@@ -132,7 +132,7 @@ net_part=" 🟢"
 proj_encoded=$(echo "$cwd" | sed 's|/|-|g')
 proj_log_dir="$HOME/.claude/projects/${proj_encoded}"
 if [ -d "$proj_log_dir" ]; then
-    latest_log=$(ls -t "$proj_log_dir"/*.jsonl 2>/dev/null | head -1)
+    latest_log=$(command ls -1t "$proj_log_dir"/*.jsonl 2>/dev/null | head -1)
     if [ -n "$latest_log" ]; then
         file_age=$(( $(date +%s) - $(stat -f %m "$latest_log" 2>/dev/null || echo 0) ))
         if [ "$file_age" -lt 300 ]; then
@@ -162,7 +162,7 @@ if [ -d "$proj_log_dir" ]; then
             fi
             # -- TPS (tokens per second) from last completed response --
             # Uses wider tail (300 lines) and caches to survive tool-heavy turns
-            tps_cache="/tmp/.claude-statusline-tps-$$"
+            tps_cache="/tmp/.claude-statusline-tps-${proj_encoded}"
             tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
 import sys, json
 from datetime import datetime
