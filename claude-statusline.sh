@@ -65,7 +65,7 @@ cpct() {
 # -- Directory --
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
 [ -z "$cwd" ] && cwd=$(pwd)
-dir="${cwd/#$HOME/~}"
+dir="${cwd/#$HOME/\~}"
 
 # -- Git branch --
 git_part=""
