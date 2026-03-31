@@ -200,8 +200,10 @@ fmt_reset() {
     local diff=$(( epoch - now ))
     [ "$diff" -le 0 ] && { printf "%b" "\033[37mnow${reset}"; return; }
     local d=$(( diff / 86400 )) h=$(( (diff % 86400) / 3600 )) m=$(( (diff % 3600) / 60 ))
-    if [ "$d" -gt 0 ]; then
+    if [ "$d" -gt 0 ] && [ "$h" -gt 0 ]; then
         printf "%b" "\033[37m${d}d${h}h${reset}"
+    elif [ "$d" -gt 0 ]; then
+        printf "%b" "\033[37m${d}d${reset}"
     elif [ "$h" -gt 0 ]; then
         printf "%b" "\033[37m${h}h${m}m${reset}"
     else
@@ -224,7 +226,11 @@ fi
 cost_part=""
 cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
 if [ -n "$cost_usd" ]; then
-    cost_fmt=$(printf '%.0f' "$cost_usd")
+    if [ "$(echo "$cost_usd < 1" | bc 2>/dev/null)" = "1" ]; then
+        cost_fmt=$(printf '%.1f' "$cost_usd")
+    else
+        cost_fmt=$(printf '%.0f' "$cost_usd")
+    fi
     cost_part=" ${yellow}\$${cost_fmt}${reset}"
 fi
 
