@@ -187,19 +187,27 @@ if samples:
     [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
         net_part="${net_part} ${b_white}${tps_val} tps${reset}"
 fi
-# -- API RTT: ping every 30s, cache result --
+# -- API RTT: ping every 30s, sliding window median --
 rtt_cache="/tmp/.claude-statusline-rtt"
 rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
 if [ "$rtt_age" -gt 30 ]; then
-    rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
-        | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
+    rtt_fresh=$(ping -c 3 -W 2 api.anthropic.com 2>/dev/null \
+        | grep -o 'time=[0-9.]*' | cut -d= -f2 \
+        | sort -n | awk 'NR==2{printf "%d", $1}')
     # Fallback to curl TTFB if ping fails (ICMP blocked)
     [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
-    [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null && echo "$rtt_fresh" > "$rtt_cache"
+    if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
+        # Append to sliding window (keep last 5)
+        echo "$rtt_fresh" >> "$rtt_cache"
+        tail -5 "$rtt_cache" > "$rtt_cache.tmp" && mv "$rtt_cache.tmp" "$rtt_cache"
+    fi
 fi
-rtt_ms=$(cat "$rtt_cache" 2>/dev/null)
+rtt_ms=""
+if [ -f "$rtt_cache" ]; then
+    rtt_ms=$(sort -n "$rtt_cache" | awk '{a[NR]=$1} END{print a[int(NR/2)+1]}')
+fi
 if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
     if [ "$rtt_ms" -ge 500 ]; then rtt_c="${red}"
     elif [ "$rtt_ms" -ge 300 ]; then rtt_c="${yellow}"
