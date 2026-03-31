@@ -129,41 +129,34 @@ fi
 # -- Network health (from CC session JSONL logs, inspired by claudebubble) --
 # 🟢 = healthy, 🟡 = light retries (1-4), 🔴 = heavy retries (5+)
 net_part=" 🟢"
-proj_encoded=$(echo "$cwd" | sed 's|/|-|g')
-proj_log_dir="$HOME/.claude/projects/${proj_encoded}"
-if [ -d "$proj_log_dir" ]; then
-    latest_log=$(command ls -1t "$proj_log_dir"/*.jsonl 2>/dev/null | head -1)
-    if [ -n "$latest_log" ]; then
-        file_age=$(( $(date +%s) - $(stat -f %m "$latest_log" 2>/dev/null || echo 0) ))
-        if [ "$file_age" -lt 300 ]; then
-            tail_buf=$(tail -100 "$latest_log" 2>/dev/null)
-            # Compare position: last retry vs last successful response
-            last_err_ln=$(echo "$tail_buf" | grep -n '"retryInMs"' | tail -1 | cut -d: -f1)
-            last_ok_ln=$(echo "$tail_buf" | grep -n '"stop_reason"' | tail -1 | cut -d: -f1)
-            last_err_ln=${last_err_ln:-0}
-            last_ok_ln=${last_ok_ln:-0}
-            if [ "$last_err_ln" -gt "$last_ok_ln" ] && [ "$last_err_ln" -gt 0 ]; then
-                retry_count=$(echo "$tail_buf" | grep -c '"retryInMs"')
-                # Detect dominant error type from troubleshooting knowledge
-                err_tag=""
-                if echo "$tail_buf" | grep -q 'CERTIFICATE\|ERR_TLS'; then
-                    err_tag="cert"
-                elif echo "$tail_buf" | grep -q 'ECONNRESET'; then
-                    err_tag="rst"
-                elif echo "$tail_buf" | grep -q '"504"'; then
-                    err_tag="504"
-                fi
-                if [ "$retry_count" -ge 5 ]; then
-                    net_part=" 🔴${red}${retry_count}${reset}"
-                else
-                    net_part=" 🟡${yellow}${retry_count}${reset}"
-                fi
-                [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
-            fi
-            # -- TPS (tokens per second) from last completed response --
-            # Uses wider tail (300 lines) and caches to survive tool-heavy turns
-            tps_cache="/tmp/.claude-statusline-tps-${proj_encoded}"
-            tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
+# Find the most recently modified JSONL across all projects (not subagents)
+# Handles cwd changes, /add-dir, worktrees — always finds the active session
+latest_log=$(find "$HOME/.claude/projects" -maxdepth 2 -name "*.jsonl" \
+    ! -path "*/subagents/*" -mmin -5 2>/dev/null \
+    | xargs command ls -1t 2>/dev/null | head -1)
+if [ -n "$latest_log" ]; then
+    tail_buf=$(tail -100 "$latest_log" 2>/dev/null)
+    # Compare position: last retry vs last successful response
+    last_err_ln=$(echo "$tail_buf" | grep -n '"retryInMs"' | tail -1 | cut -d: -f1)
+    last_ok_ln=$(echo "$tail_buf" | grep -n '"stop_reason"' | tail -1 | cut -d: -f1)
+    last_err_ln=${last_err_ln:-0}
+    last_ok_ln=${last_ok_ln:-0}
+    if [ "$last_err_ln" -gt "$last_ok_ln" ] && [ "$last_err_ln" -gt 0 ]; then
+        retry_count=$(echo "$tail_buf" | grep -c '"retryInMs"')
+        err_tag=""
+        if echo "$tail_buf" | grep -q 'CERTIFICATE\|ERR_TLS'; then err_tag="cert"
+        elif echo "$tail_buf" | grep -q 'ECONNRESET'; then err_tag="rst"
+        elif echo "$tail_buf" | grep -q '"504"'; then err_tag="504"; fi
+        if [ "$retry_count" -ge 5 ]; then
+            net_part=" 🔴${red}${retry_count}${reset}"
+        else
+            net_part=" 🟡${yellow}${retry_count}${reset}"
+        fi
+        [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
+    fi
+    # -- TPS: wider tail (300 lines) + cache for tool-heavy turns --
+    tps_cache="/tmp/.claude-statusline-tps"
+    tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
 import sys, json
 from datetime import datetime
 last_user_ts = None
@@ -183,16 +176,13 @@ if best:
     dt = (t2-t1).total_seconds()
     if dt > 0: print(int(best[2]/dt))
 " 2>/dev/null)
-            # Cache valid TPS; fall back to cached value when not found
-            if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
-                echo "$tps_val" > "$tps_cache"
-            elif [ -f "$tps_cache" ]; then
-                tps_val=$(cat "$tps_cache")
-            fi
-            [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
-                net_part="${net_part} ${b_white}${tps_val}tps${reset}"
-        fi
+    if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
+        echo "$tps_val" > "$tps_cache"
+    elif [ -f "$tps_cache" ]; then
+        tps_val=$(cat "$tps_cache")
     fi
+    [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
+        net_part="${net_part} ${b_white}${tps_val}tps${reset}"
 fi
 
 # -- Rate limits (5h / 7d) with reset countdown --
