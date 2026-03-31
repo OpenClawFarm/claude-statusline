@@ -189,7 +189,10 @@ fi
 rtt_cache="/tmp/.claude-statusline-rtt"
 rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
 if [ "$rtt_age" -gt 30 ]; then
-    rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
+    rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
+        | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
+    # Fallback to curl TTFB if ping fails (ICMP blocked)
+    [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
     [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null && echo "$rtt_fresh" > "$rtt_cache"
