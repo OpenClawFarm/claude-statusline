@@ -230,10 +230,7 @@ fi
 # -- API RTT: ping with adaptive interval, sliding window median --
 rtt_cache="/tmp/.claude-statusline-rtt"
 rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
-rtt_samples=0
-[ -f "$rtt_cache" ] && rtt_samples=$(wc -l < "$rtt_cache" | tr -d ' ')
-if [ "$rtt_samples" -lt 5 ]; then rtt_interval=5; else rtt_interval=10; fi
-if [ "$rtt_age" -gt "$rtt_interval" ]; then
+if [ "$rtt_age" -gt 5 ]; then
     # Single packet, 2s timeout — never blocks more than 2s
     rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
         | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
@@ -241,7 +238,7 @@ if [ "$rtt_age" -gt "$rtt_interval" ]; then
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
     if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
-        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -5 > "$rtt_cache.tmp" \
+        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -20 > "$rtt_cache.tmp" \
             && mv "$rtt_cache.tmp" "$rtt_cache"
     fi
 fi
