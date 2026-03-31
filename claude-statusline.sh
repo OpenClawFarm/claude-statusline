@@ -160,7 +160,7 @@ if [ -n "$latest_log" ]; then
 import sys, json
 from datetime import datetime
 prev_ts = None
-best = None
+samples = []
 for line in sys.stdin:
     try: d = json.loads(line)
     except: continue
@@ -168,13 +168,14 @@ for line in sys.stdin:
     if d.get('type') == 'assistant' and d.get('message',{}).get('stop_reason') and prev_ts:
         ot = d.get('message',{}).get('usage',{}).get('output_tokens',0)
         if ot > 20:
-            best = (prev_ts, ts, ot)
+            t1 = datetime.fromisoformat(prev_ts.replace('Z','+00:00'))
+            t2 = datetime.fromisoformat(ts.replace('Z','+00:00'))
+            dt = (t2-t1).total_seconds()
+            if dt > 0.1: samples.append(int(ot/dt))
     if ts: prev_ts = ts
-if best:
-    t1 = datetime.fromisoformat(best[0].replace('Z','+00:00'))
-    t2 = datetime.fromisoformat(best[1].replace('Z','+00:00'))
-    dt = (t2-t1).total_seconds()
-    if dt > 0: print(int(best[2]/dt))
+if samples:
+    recent = samples[-5:]
+    print(sorted(recent)[len(recent)//2])
 " 2>/dev/null)
     if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
         echo "$tps_val" > "$tps_cache"
