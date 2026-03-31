@@ -2,6 +2,8 @@
 
 A HUD-style status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that turns your prompt bar into a real-time dashboard — model, context, network health, throughput, quotas, and cost, all in one line.
 
+![demo](demo.gif)
+
 ```
 📂 ~/myproject  main~+ │ Opus 4.6 ◕high 280k 🟢 43t/s │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d12h  $2
 ```
@@ -28,17 +30,17 @@ This script answers all of that **without leaving your terminal**.
 
 ### 9 Modules, One Line
 
-| Module | What It Shows | Source |
-|--------|---------------|--------|
-| **Directory** | `📂 ~/path` — clickable, opens in Finder | CC JSON |
-| **Git Branch** | ` main~+` — dirty indicators, clickable to GitHub | `git` |
-| **Model** | `Opus 4.6` / `Sonnet 4.6` / `Haiku 4.5` | CC JSON |
-| **Effort** | `◔low` `◑medium` `◕high` — clickable toggle | `settings.json` |
-| **Context Window** | `280k` — tokens used, color-coded | CC JSON |
-| **Network Health** | 🟢🟡🔴 — live retry detection with error diagnosis | Session JSONL |
-| **TPS** | `43t/s` — real tokens-per-second throughput | Session JSONL |
-| **Rate Limits** | `5h ██░░░░ 32% 3h42m` — quota bars with countdown | CC JSON |
-| **Session Cost** | `$2` — cumulative USD | CC JSON |
+| Module | Display | Source |
+|--------|---------|--------|
+| **Directory** | `📂 ~/path` clickable | CC JSON |
+| **Git Branch** | ` main~+` clickable | `git` |
+| **Model** | `Opus 4.6` | CC JSON |
+| **Effort** | `◔` `◑` `◕` clickable | settings.json |
+| **Context** | `280k` color-coded | CC JSON |
+| **Network** | 🟢🟡🔴 + error type | JSONL |
+| **TPS** | `43t/s` throughput | JSONL |
+| **Quotas** | `5h ██░░░░ 32%` bars | CC JSON |
+| **Cost** | `$2` cumulative | CC JSON |
 
 ### Network Health Monitor
 
@@ -85,13 +87,15 @@ A sudden TPS drop (e.g., 50 → 12) signals network degradation *before* you hit
 
 ### Clickable Everything (OSC 8)
 
-In supported terminals (iTerm2, Kitty, WezTerm, Ghostty):
+Hold **Cmd** (macOS) or **Ctrl** (Linux) and click any highlighted element:
 
-| Element | Cmd+Click Target |
-|---------|-----------------|
-| `📂 ~/path` | Opens directory in Finder |
-| ` main` | Opens branch on GitHub |
-| `◕high` | Opens CycleEffort.app (if installed) |
+| Element | Click → | Shortcut |
+|---------|---------|----------|
+| `📂 ~/path` | Finder | Cmd+Click |
+| ` main` | GitHub branch page | Cmd+Click |
+| `◕high` | CycleEffort.app | Cmd+Click |
+
+Requires a terminal that supports [OSC 8 hyperlinks](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda): iTerm2, Kitty, WezTerm, Ghostty.
 
 ### Color System
 
