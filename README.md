@@ -148,7 +148,7 @@ EOF
 {
   "statusLine": {
     "type": "command",
-    "command": "bash /Users/YOUR_NAME/.claude/statusline-command.sh"
+    "command": "bash ~/.claude/statusline-command.sh"
   }
 }
 ```
@@ -171,7 +171,7 @@ The script receives JSON from Claude Code on stdin every ~1 second:
 ```json
 {
   "model": { "display_name": "Claude Opus 4.6" },
-  "workspace": { "current_dir": "/Users/you/project" },
+  "workspace": { "current_dir": "~/project" },
   "context_window": { "remaining_percentage": 72 },
   "rate_limits": {
     "five_hour": { "used_percentage": 32, "resets_at": 1743500000 },
