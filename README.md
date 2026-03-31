@@ -5,7 +5,7 @@ A HUD-style status line for [Claude Code](https://docs.anthropic.com/en/docs/cla
 ![demo](demo.gif)
 
 ```
-📂 ~/myproject  main~+ │ Opus 4.6 ◕high 280k 🟢 43t/s │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d12h  $2
+📂 ~/myproject  main~+ │ Opus 4.6 ◕high 280k 🟢 43tps │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d12h  $2
 ```
 
 > **One glance. Everything you need to know.**
@@ -38,7 +38,7 @@ This script answers all of that **without leaving your terminal**.
 | **Effort** | `◔` `◑` `◕` clickable | settings.json |
 | **Context** | `280k` color-coded | CC JSON |
 | **Network** | 🟢🟡🔴 + error type | JSONL |
-| **TPS** | `43t/s` throughput | JSONL |
+| **TPS** | `43tps` throughput | JSONL |
 | **Quotas** | `5h ██░░░░ 32%` bars | CC JSON |
 | **Cost** | `$2` cumulative | CC JSON |
 
@@ -79,9 +79,9 @@ TPS = output_tokens / (response_timestamp - request_timestamp)
 ```
 
 Normal ranges (through proxy):
-- Opus 4.6: **35-55 t/s**
-- Sonnet 4.6: **80-120 t/s**
-- Haiku 4.5: **150-200 t/s**
+- Opus 4.6: **35-55 tps**
+- Sonnet 4.6: **80-120 tps**
+- Haiku 4.5: **150-200 tps**
 
 A sudden TPS drop (e.g., 50 → 12) signals network degradation *before* you hit full retry mode. It's the early warning that complements the 🟢🟡🔴 indicators.
 

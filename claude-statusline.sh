@@ -161,7 +161,9 @@ if [ -d "$proj_log_dir" ]; then
                 [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
             fi
             # -- TPS (tokens per second) from last completed response --
-            tps_val=$(echo "$tail_buf" | python3 -c "
+            # Uses wider tail (300 lines) and caches to survive tool-heavy turns
+            tps_cache="/tmp/.claude-statusline-tps-$$"
+            tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
 import sys, json
 from datetime import datetime
 last_user_ts = None
@@ -181,8 +183,14 @@ if best:
     dt = (t2-t1).total_seconds()
     if dt > 0: print(int(best[2]/dt))
 " 2>/dev/null)
+            # Cache valid TPS; fall back to cached value when not found
+            if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
+                echo "$tps_val" > "$tps_cache"
+            elif [ -f "$tps_cache" ]; then
+                tps_val=$(cat "$tps_cache")
+            fi
             [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
-                net_part="${net_part} ${b_white}${tps_val}t/s${reset}"
+                net_part="${net_part} ${b_white}${tps_val}tps${reset}"
         fi
     fi
 fi
