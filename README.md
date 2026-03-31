@@ -155,12 +155,27 @@ EOF
 
 4. Restart Claude Code. The status line appears immediately.
 
+### Windows (Git Bash)
+
+Works out of the box with Git Bash. Same one-command install — just make sure `jq` and `python3` are on your PATH:
+
+```bash
+# Install jq: https://jqlang.github.io/jq/download/
+# Install Python: https://www.python.org/downloads/
+curl -o ~/.claude/statusline-command.sh \
+  https://raw.githubusercontent.com/OpenClawFarm/claude-statusline/main/claude-statusline.sh
+```
+
+OSC 8 clickable links work in Windows Terminal.
+
 ### Requirements
 
-- **Claude Code** v1.0.71+ (statusline support)
-- **jq** — `brew install jq`
-- **Python 3.9+** — for TPS calculation (pre-installed on macOS)
-- **Git** — for branch display
+| Dependency | macOS | Windows (Git Bash) |
+|------------|-------|--------------------|
+| Claude Code v1.0.71+ | Required | Required |
+| jq | `brew install jq` | [Download](https://jqlang.github.io/jq/download/) |
+| Python 3.9+ | Pre-installed | [Download](https://www.python.org/downloads/) |
+| Git | Pre-installed | Included in Git Bash |
 
 ---
 
