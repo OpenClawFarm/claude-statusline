@@ -157,17 +157,25 @@ if [ -n "$latest_log" ]; then
     # -- TPS: wider tail (300 lines) + cache for tool-heavy turns --
     tps_cache="/tmp/.claude-statusline-tps"
     tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
-import sys, json
+import sys, json, os
 from datetime import datetime
 prev_ts = None
 samples = []
+# Cold start: count existing cached samples to decide threshold
+cache_path = '/tmp/.claude-statusline-tps-history'
+cached_count = 0
+if os.path.exists(cache_path):
+    with open(cache_path) as f:
+        cached_count = len(f.read().strip().splitlines())
+# Adaptive threshold: relaxed during cold start, strict after 5 samples
+min_tokens = 10 if cached_count < 5 else 100
 for line in sys.stdin:
     try: d = json.loads(line)
     except: continue
     ts = d.get('timestamp')
     if d.get('type') == 'assistant' and d.get('message',{}).get('stop_reason') and prev_ts:
         ot = d.get('message',{}).get('usage',{}).get('output_tokens',0)
-        if ot >= 100:
+        if ot >= min_tokens:
             t1 = datetime.fromisoformat(prev_ts.replace('Z','+00:00'))
             t2 = datetime.fromisoformat(ts.replace('Z','+00:00'))
             dt = (t2-t1).total_seconds()
@@ -177,7 +185,14 @@ for line in sys.stdin:
     if ts: prev_ts = ts
 if samples:
     recent = samples[-5:]
-    print(sorted(recent)[len(recent)//2])
+    median = sorted(recent)[len(recent)//2]
+    # Append to history (keep last 10 for count tracking)
+    with open(cache_path, 'a') as f: f.write(str(median) + '\n')
+    # Trim history to last 10
+    with open(cache_path) as f: lines = f.read().strip().splitlines()
+    if len(lines) > 10:
+        with open(cache_path, 'w') as f: f.write('\n'.join(lines[-10:]) + '\n')
+    print(median)
 " 2>/dev/null)
     if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
         echo "$tps_val" > "$tps_cache"
@@ -190,7 +205,11 @@ fi
 # -- API RTT: ping every 30s, sliding window median --
 rtt_cache="/tmp/.claude-statusline-rtt"
 rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
-if [ "$rtt_age" -gt 30 ]; then
+rtt_samples=0
+[ -f "$rtt_cache" ] && rtt_samples=$(wc -l < "$rtt_cache" | tr -d ' ')
+# Adaptive interval: aggressive during cold start (<5 samples), relaxed after
+if [ "$rtt_samples" -lt 5 ]; then rtt_interval=5; else rtt_interval=10; fi
+if [ "$rtt_age" -gt "$rtt_interval" ]; then
     rtt_fresh=$(ping -c 3 -W 2 api.anthropic.com 2>/dev/null \
         | grep -o 'time=[0-9.]*' | cut -d= -f2 \
         | sort -n | awk 'NR==2{printf "%d", $1}')
