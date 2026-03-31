@@ -167,11 +167,13 @@ for line in sys.stdin:
     ts = d.get('timestamp')
     if d.get('type') == 'assistant' and d.get('message',{}).get('stop_reason') and prev_ts:
         ot = d.get('message',{}).get('usage',{}).get('output_tokens',0)
-        if ot > 20:
+        if ot >= 100:
             t1 = datetime.fromisoformat(prev_ts.replace('Z','+00:00'))
             t2 = datetime.fromisoformat(ts.replace('Z','+00:00'))
             dt = (t2-t1).total_seconds()
-            if dt > 0.1: samples.append(int(ot/dt))
+            if dt > 0.3:
+                tps = int(ot/dt)
+                if 10 <= tps <= 500: samples.append(tps)
     if ts: prev_ts = ts
 if samples:
     recent = samples[-5:]
