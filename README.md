@@ -87,11 +87,13 @@ TPS = output_tokens / streaming_time
 ```
 
 Three filters ensure accuracy:
-- **≥100 output tokens** — excludes thinking-heavy short responses
+- **≥100 output tokens** — excludes thinking-heavy short responses (relaxed to ≥10 during cold start)
 - **≥0.3s duration** — excludes timing-imprecise sub-second bursts
 - **10-500 tps range** — excludes anomalous outliers (e.g., 833k tps)
 
 The time is measured from the *preceding JSONL entry* to the assistant response, which automatically excludes tool execution time in multi-tool turns.
+
+**Adaptive cold start**: On fresh sessions with <5 cached samples, the token threshold relaxes from 100 to 10, so TPS appears within seconds instead of waiting for a long response.
 
 Normal ranges (through proxy):
 
@@ -101,10 +103,11 @@ Normal ranges (through proxy):
 | Sonnet 4.6 | 80-120 |
 | Haiku 4.5 | 150-200 |
 
-**RTT** (round-trip time) pings `api.anthropic.com` every 30 seconds:
+**RTT** (round-trip time) pings `api.anthropic.com`:
 - Each round sends 3 ICMP packets → takes the median
 - Appends to a 5-round sliding window → takes the median of the window
 - Falls back to `curl` TTFB if ICMP is blocked
+- **Adaptive interval**: 5s during cold start (<5 samples), 10s after
 
 | RTT | Color | Meaning |
 |-----|-------|---------|

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Claude Code Statusline - designed for leecz
-# Version: 1.0.0
+# Version: 2.0.0
 # Color scheme inspired by Starship / Lazygit / btop
+# Optimized: ~45 forks → ~12 forks per refresh
 
 input=$(cat)
 
@@ -9,22 +10,38 @@ input=$(cat)
 bold='\033[1m'
 dim='\033[2m'
 reset='\033[0m'
-# Bright variants for primary info
-b_cyan='\033[1;96m'      # directory (starship convention)
-b_magenta='\033[1;95m'    # git branch (lazygit convention)
-b_blue='\033[94m'          # model name (no bold)
-b_white='\033[97m'         # key values (percentages, no bold)
-# Semantic bar colors
+b_cyan='\033[1;96m'
+b_magenta='\033[1;95m'
+b_blue='\033[94m'
+b_white='\033[97m'
 green='\033[32m'
 yellow='\033[33m'
 red='\033[31m'
 bright_blue='\033[94m'
 bright_mag='\033[95m'
-# Dim elements
-d_sep='\033[2;90m'        # separators (dark gray, dim)
-d_label='\033[2;37m'      # labels & context text
+d_sep='\033[2;90m'
+d_label='\033[2;37m'
 
-# HUD-style colored bar: bar <percent> <width> <type>
+# -- Parse all CC JSON fields in a single jq call --
+IFS=$'\t' read -r cwd model ctx_remaining five_h five_h_reset seven_d seven_d_reset cost_usd <<< \
+    "$(echo "$input" | jq -r '[
+        (.workspace.current_dir // .cwd // ""),
+        (.model.display_name // ""),
+        (.context_window.remaining_percentage // ""),
+        (.rate_limits.five_hour.used_percentage // ""),
+        (.rate_limits.five_hour.resets_at // ""),
+        (.rate_limits.seven_day.used_percentage // ""),
+        (.rate_limits.seven_day.resets_at // ""),
+        (.cost.total_cost_usd // "")
+    ] | @tsv')"
+
+[ -z "$cwd" ] && cwd=$(pwd)
+dir="${cwd/#$HOME/\~}"
+model="${model:-?}"
+model="${model/Claude /}"
+model="${model/ (*)/}"
+
+# HUD-style colored bar (no seq — pure bash)
 bar() {
     local pct=${1:-0} w=${2:-8} type=${3:-ctx}
     local filled=$(( (pct * w + 50) / 100 ))
@@ -40,13 +57,12 @@ bar() {
         elif [ "$pct" -ge 70 ]; then c=$yellow
         else c=$green; fi
     fi
-    local bar_str=""
-    [ "$filled" -gt 0 ] && bar_str="${c}$(printf '█%.0s' $(seq 1 $filled))"
-    [ "$empty" -gt 0 ] && bar_str="${bar_str}${dim}$(printf '░%.0s' $(seq 1 $empty))"
-    printf "%b" "${bar_str}${reset}"
+    local bar_filled="" bar_empty=""
+    printf -v bar_filled '%*s' "$filled" ''; bar_filled="${bar_filled// /█}"
+    printf -v bar_empty '%*s' "$empty" ''; bar_empty="${bar_empty// /░}"
+    printf "%b" "${c}${bar_filled}${dim}${bar_empty}${reset}"
 }
 
-# Colorize percent value based on threshold
 cpct() {
     local pct=${1:-0} type=${2:-ctx}
     local c
@@ -62,11 +78,6 @@ cpct() {
     printf "%b" "${bold}${c}$(printf '%d' $pct)%${reset}"
 }
 
-# -- Directory --
-cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
-[ -z "$cwd" ] && cwd=$(pwd)
-dir="${cwd/#$HOME/\~}"
-
 # -- Git branch --
 git_part=""
 if cd "$cwd" 2>/dev/null && git -c gc.auto=0 rev-parse --is-inside-work-tree &>/dev/null; then
@@ -75,7 +86,6 @@ if cd "$cwd" 2>/dev/null && git -c gc.auto=0 rev-parse --is-inside-work-tree &>/
     dirty=""
     git -c gc.auto=0 diff-index --quiet HEAD -- 2>/dev/null || dirty="~"
     git -c gc.auto=0 diff --cached --quiet 2>/dev/null || dirty="${dirty}+"
-    # Build GitHub branch URL from remote
     remote_url=$(git -c gc.auto=0 remote get-url origin 2>/dev/null)
     gh_url=""
     if [ -n "$remote_url" ]; then
@@ -89,13 +99,7 @@ if cd "$cwd" 2>/dev/null && git -c gc.auto=0 rev-parse --is-inside-work-tree &>/
     fi
 fi
 
-# -- Model --
-model=$(echo "$input" | jq -r '.model.display_name // empty')
-model="${model:-?}"
-model="${model/Claude /}"
-model="${model/ (*)/}"
-
-# -- Effort level indicator (read from settings.json) --
+# -- Effort level --
 effort_level=$(jq -r '.effortLevel // empty' ~/.claude/settings.json 2>/dev/null)
 case "$effort_level" in
     low|min)     effort_icon="◔" ;;
@@ -106,47 +110,62 @@ esac
 effort_part=""
 [ -n "$effort_icon" ] && effort_part=" \e]8;;file://${HOME}/.claude/CycleEffort.app\a\033[37m${effort_icon}${effort_level}${reset}\e]8;;\a"
 
-# -- Context Window usage (show as Xk) --
+# -- Context Window (Xk) --
 ctx_part=""
-ctx_remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
 if [ -n "$ctx_remaining" ]; then
     ctx_pct=$(( 100 - ${ctx_remaining%.*} ))
     [ "$ctx_pct" -lt 0 ] && ctx_pct=0
     [ "$ctx_pct" -gt 100 ] && ctx_pct=100
-    # Determine total context size from model
     case "$model" in
         *Opus*|*opus*) ctx_total=1000 ;;
         *)             ctx_total=200 ;;
     esac
     ctx_k=$(( ctx_pct * ctx_total / 100 ))
-    # Color by usage level
     if [ "$ctx_pct" -ge 85 ]; then ctx_c="${red}"
     elif [ "$ctx_pct" -ge 70 ]; then ctx_c="${yellow}"
     else ctx_c="${green}"; fi
     ctx_part=" ${ctx_c}${ctx_k}k${reset}"
 fi
 
-# -- Network health (from CC session JSONL logs, inspired by claudebubble) --
-# 🟢 = healthy, 🟡 = light retries (1-4), 🔴 = heavy retries (5+)
+# -- Network health + TPS + RTT --
 net_part=" 🟢"
-# Find the most recently modified JSONL across all projects (not subagents)
-# Handles cwd changes, /add-dir, worktrees — always finds the active session
-latest_log=$(find "$HOME/.claude/projects" -maxdepth 2 -name "*.jsonl" \
-    ! -path "*/subagents/*" -mmin -5 2>/dev/null \
-    | xargs command ls -1t 2>/dev/null | head -1)
-if [ -n "$latest_log" ]; then
+
+# Find active session (cached 10s to avoid repeated find)
+log_cache="/tmp/.claude-statusline-log"
+log_cache_age=$(( $(date +%s) - $(stat -f %m "$log_cache" 2>/dev/null || echo 0) ))
+if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ]; then
+    find "$HOME/.claude/projects" -maxdepth 2 -name "*.jsonl" \
+        ! -path "*/subagents/*" -mmin -5 2>/dev/null \
+        | xargs command ls -1t 2>/dev/null | head -1 > "$log_cache"
+fi
+latest_log=$(cat "$log_cache" 2>/dev/null)
+
+if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
     tail_buf=$(tail -100 "$latest_log" 2>/dev/null)
-    # Compare position: last retry vs last successful response
-    last_err_ln=$(echo "$tail_buf" | grep -n '"retryInMs"' | tail -1 | cut -d: -f1)
-    last_ok_ln=$(echo "$tail_buf" | grep -n '"stop_reason"' | tail -1 | cut -d: -f1)
-    last_err_ln=${last_err_ln:-0}
-    last_ok_ln=${last_ok_ln:-0}
+
+    # Network retry detection — pure bash, no grep forks
+    last_err_ln=0
+    last_ok_ln=0
+    retry_count=0
+    has_cert=0 has_rst=0 has_504=0
+    ln=0
+    while IFS= read -r line; do
+        ((ln++))
+        if [[ "$line" == *'"retryInMs"'* ]]; then
+            last_err_ln=$ln
+            ((retry_count++))
+            [[ "$line" == *CERTIFICATE* || "$line" == *ERR_TLS* ]] && has_cert=1
+            [[ "$line" == *ECONNRESET* ]] && has_rst=1
+            [[ "$line" == *'"504"'* ]] && has_504=1
+        fi
+        [[ "$line" == *'"stop_reason"'* ]] && last_ok_ln=$ln
+    done <<< "$tail_buf"
+
     if [ "$last_err_ln" -gt "$last_ok_ln" ] && [ "$last_err_ln" -gt 0 ]; then
-        retry_count=$(echo "$tail_buf" | grep -c '"retryInMs"')
         err_tag=""
-        if echo "$tail_buf" | grep -q 'CERTIFICATE\|ERR_TLS'; then err_tag="cert"
-        elif echo "$tail_buf" | grep -q 'ECONNRESET'; then err_tag="rst"
-        elif echo "$tail_buf" | grep -q '"504"'; then err_tag="504"; fi
+        [ "$has_cert" -eq 1 ] && err_tag="cert"
+        [ "$has_rst" -eq 1 ] && [ -z "$err_tag" ] && err_tag="rst"
+        [ "$has_504" -eq 1 ] && [ -z "$err_tag" ] && err_tag="504"
         if [ "$retry_count" -ge 5 ]; then
             net_part=" 🔴${red}${retry_count}${reset}"
         else
@@ -154,20 +173,22 @@ if [ -n "$latest_log" ]; then
         fi
         [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
     fi
-    # -- TPS: wider tail (300 lines) + cache for tool-heavy turns --
+
+    # -- TPS: only recompute when log has changed --
     tps_cache="/tmp/.claude-statusline-tps"
-    tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
+    log_mtime=$(stat -f %m "$latest_log" 2>/dev/null || echo 0)
+    tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
+    if [ "$log_mtime" -gt "$tps_mtime" ]; then
+        tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
 import sys, json, os
 from datetime import datetime
 prev_ts = None
 samples = []
-# Cold start: count existing cached samples to decide threshold
 cache_path = '/tmp/.claude-statusline-tps-history'
 cached_count = 0
 if os.path.exists(cache_path):
     with open(cache_path) as f:
         cached_count = len(f.read().strip().splitlines())
-# Adaptive threshold: relaxed during cold start, strict after 5 samples
 min_tokens = 10 if cached_count < 5 else 100
 for line in sys.stdin:
     try: d = json.loads(line)
@@ -186,41 +207,37 @@ for line in sys.stdin:
 if samples:
     recent = samples[-5:]
     median = sorted(recent)[len(recent)//2]
-    # Append to history (keep last 10 for count tracking)
     with open(cache_path, 'a') as f: f.write(str(median) + '\n')
-    # Trim history to last 10
     with open(cache_path) as f: lines = f.read().strip().splitlines()
     if len(lines) > 10:
         with open(cache_path, 'w') as f: f.write('\n'.join(lines[-10:]) + '\n')
     print(median)
 " 2>/dev/null)
-    if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
-        echo "$tps_val" > "$tps_cache"
-    elif [ -f "$tps_cache" ]; then
-        tps_val=$(cat "$tps_cache")
+        if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
+            echo "$tps_val" > "$tps_cache"
+        fi
     fi
+    tps_val=$(cat "$tps_cache" 2>/dev/null)
     [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
         net_part="${net_part} ${b_white}${tps_val} tps${reset}"
 fi
-# -- API RTT: ping every 30s, sliding window median --
+
+# -- API RTT: ping with adaptive interval, sliding window median --
 rtt_cache="/tmp/.claude-statusline-rtt"
 rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
 rtt_samples=0
 [ -f "$rtt_cache" ] && rtt_samples=$(wc -l < "$rtt_cache" | tr -d ' ')
-# Adaptive interval: aggressive during cold start (<5 samples), relaxed after
 if [ "$rtt_samples" -lt 5 ]; then rtt_interval=5; else rtt_interval=10; fi
 if [ "$rtt_age" -gt "$rtt_interval" ]; then
-    rtt_fresh=$(ping -c 3 -W 2 api.anthropic.com 2>/dev/null \
-        | grep -o 'time=[0-9.]*' | cut -d= -f2 \
-        | sort -n | awk 'NR==2{printf "%d", $1}')
-    # Fallback to curl TTFB if ping fails (ICMP blocked)
+    # Single packet, 2s timeout — never blocks more than 2s
+    rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
+        | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
     [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
     if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
-        # Append to sliding window (keep last 5)
-        echo "$rtt_fresh" >> "$rtt_cache"
-        tail -5 "$rtt_cache" > "$rtt_cache.tmp" && mv "$rtt_cache.tmp" "$rtt_cache"
+        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -5 > "$rtt_cache.tmp" \
+            && mv "$rtt_cache.tmp" "$rtt_cache"
     fi
 fi
 rtt_ms=""
@@ -234,14 +251,8 @@ if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
     net_part="${net_part} ${rtt_c}${rtt_ms}ms${reset}"
 fi
 
-# -- Rate limits (5h / 7d) with reset countdown --
+# -- Rate limits --
 rl=""
-five_h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
-five_h_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
-seven_d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
-seven_d_reset=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
-
-# Format reset epoch → human-readable countdown
 fmt_reset() {
     local epoch=$1
     [ -z "$epoch" ] && return
@@ -259,7 +270,6 @@ fmt_reset() {
         printf "%b" "\033[37m${m}m${reset}"
     fi
 }
-
 if [ -n "$five_h" ]; then
     f=${five_h%.*}
     rl=" ${d_sep}│${reset} \033[37m5h${reset} $(bar $f 6 quota) $(cpct $f quota)"
@@ -273,9 +283,9 @@ fi
 
 # -- Cost --
 cost_part=""
-cost_usd=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
 if [ -n "$cost_usd" ]; then
-    if [ "$(echo "$cost_usd < 1" | bc 2>/dev/null)" = "1" ]; then
+    cost_int=${cost_usd%%.*}
+    if [ "${cost_int:-0}" -lt 1 ]; then
         cost_fmt=$(printf '%.1f' "$cost_usd")
     else
         cost_fmt=$(printf '%.0f' "$cost_usd")
@@ -283,8 +293,6 @@ if [ -n "$cost_usd" ]; then
     cost_part=" ${yellow}\$${cost_fmt}${reset}"
 fi
 
-# -- Clickable directory (OSC 8 hyperlink → file:// URI) --
-dir_link="\e]8;;file://${cwd}\a${b_cyan}📂 ${dir}${reset}\e]8;;\a"
-
 # -- Assemble --
+dir_link="\e]8;;file://${cwd}\a${b_cyan}📂 ${dir}${reset}\e]8;;\a"
 printf "%b" "${dir_link}${git_part} ${d_sep}│${reset} ${b_blue}${model}${reset}${effort_part}${ctx_part}${net_part}${rl}${cost_part}"
