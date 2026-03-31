@@ -182,7 +182,7 @@ if best:
         tps_val=$(cat "$tps_cache")
     fi
     [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
-        net_part="${net_part} ${b_white}${tps_val}tps${reset}"
+        net_part="${net_part} ${b_white}${tps_val} tps${reset}"
 fi
 
 # -- Rate limits (5h / 7d) with reset countdown --
