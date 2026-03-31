@@ -159,17 +159,17 @@ if [ -n "$latest_log" ]; then
     tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
 import sys, json
 from datetime import datetime
-last_user_ts = None
+prev_ts = None
 best = None
 for line in sys.stdin:
     try: d = json.loads(line)
     except: continue
-    if d.get('type') == 'user':
-        last_user_ts = d.get('timestamp')
-    if d.get('type') == 'assistant' and d.get('message',{}).get('stop_reason') and last_user_ts:
+    ts = d.get('timestamp')
+    if d.get('type') == 'assistant' and d.get('message',{}).get('stop_reason') and prev_ts:
         ot = d.get('message',{}).get('usage',{}).get('output_tokens',0)
-        if ot > 10:
-            best = (last_user_ts, d['timestamp'], ot)
+        if ot > 20:
+            best = (prev_ts, ts, ot)
+    if ts: prev_ts = ts
 if best:
     t1 = datetime.fromisoformat(best[0].replace('Z','+00:00'))
     t2 = datetime.fromisoformat(best[1].replace('Z','+00:00'))
