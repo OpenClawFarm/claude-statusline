@@ -1,11 +1,9 @@
 # claude-statusline
 
-A HUD-style status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that turns your prompt bar into a real-time dashboard — model, context, network health, throughput, quotas, and cost, all in one line.
-
-![demo](demo.gif)
+A HUD-style status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that turns your prompt bar into a real-time dashboard — model, context, network health, throughput, latency, quotas, and cost, all in one line.
 
 ```
-📂 ~/myproject  main~+ │ Opus 4.6 ◕high 280k 🟢 43tps │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d12h  $2
+📂 ~/myproject  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 297ms │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d  $0.3
 ```
 
 > **One glance. Everything you need to know.**
@@ -28,7 +26,7 @@ This script answers all of that **without leaving your terminal**.
 
 ## Features
 
-### 9 Modules, One Line
+### 10 Modules, One Line
 
 | Module | Display | Source |
 |--------|---------|--------|
@@ -38,9 +36,10 @@ This script answers all of that **without leaving your terminal**.
 | **Effort** | `◔` `◑` `◕` clickable | settings.json |
 | **Context** | `280k` color-coded | CC JSON |
 | **Network** | 🟢🟡🔴 + error type | JSONL |
-| **TPS** | `43tps` throughput | JSONL |
+| **TPS** | `55 tps` median throughput | JSONL |
+| **RTT** | `297ms` median latency | ping |
 | **Quotas** | `5h ██░░░░ 32%` bars | CC JSON |
-| **Cost** | `$2` cumulative | CC JSON |
+| **Cost** | `$0.3` / `$10` | CC JSON |
 
 ### Network Health Monitor
 
@@ -59,31 +58,61 @@ tail -100 session.jsonl
 |-----------|---------|--------|
 | 🟢 | All clear | — |
 | 🟡`3rst` | 1-4 retries, ECONNRESET | Switch proxy node |
-| 🟡`2cert` | 1-4 retries, TLS/certificate error | Check DNS & SSL config |
+| 🟡`2cert` | 1-4 retries, TLS/cert error | Check DNS & SSL config |
 | 🔴`8` | 5+ retries | Serious connectivity issue |
 | 🔴`6 504` | 5+ retries, gateway timeout | Check CDN proxy settings |
 
-**Auto-recovery**: The indicator returns to 🟢 the instant a successful response arrives. No manual reset.
+**Auto-recovery**: returns to 🟢 the instant a successful response arrives.
 
-**Error classification** tags the dominant error type so you know *what to fix*:
-- `rst` — Connection reset. Proxy node overloaded or ISP interference. **Switch nodes.**
+**Error tags** tell you *what to fix*:
+- `rst` — Connection reset. Proxy overloaded or ISP interference. **Switch nodes.**
 - `cert` — TLS certificate verification failed. DNS resolving to wrong IP. **Fix DNS/SSL.**
 - `504` — Cloudflare proxy timeout on long Opus outputs. **Use DNS-only mode.**
 
-### Live TPS (Tokens Per Second)
+### TPS & RTT — Dual Sliding Window Median
 
-Calculated from actual session data:
+Both metrics use **sliding window median** to smooth out noise while still tracking real changes:
 
 ```
-TPS = output_tokens / (response_timestamp - request_timestamp)
+🟢 55 tps 297ms
+    │       │
+    │       └── RTT: median of last 5 ping rounds (3 ICMP packets each)
+    └────────── TPS: median of last 5 responses (≥100 tokens, 10-500 tps)
 ```
+
+**TPS** (tokens per second) is calculated from the JSONL session transcript:
+
+```
+TPS = output_tokens / streaming_time
+```
+
+Three filters ensure accuracy:
+- **≥100 output tokens** — excludes thinking-heavy short responses
+- **≥0.3s duration** — excludes timing-imprecise sub-second bursts
+- **10-500 tps range** — excludes anomalous outliers (e.g., 833k tps)
+
+The time is measured from the *preceding JSONL entry* to the assistant response, which automatically excludes tool execution time in multi-tool turns.
 
 Normal ranges (through proxy):
-- Opus 4.6: **35-55 tps**
-- Sonnet 4.6: **80-120 tps**
-- Haiku 4.5: **150-200 tps**
 
-A sudden TPS drop (e.g., 50 → 12) signals network degradation *before* you hit full retry mode. It's the early warning that complements the 🟢🟡🔴 indicators.
+| Model | TPS |
+|-------|-----|
+| Opus 4.6 | 35-55 |
+| Sonnet 4.6 | 80-120 |
+| Haiku 4.5 | 150-200 |
+
+**RTT** (round-trip time) pings `api.anthropic.com` every 30 seconds:
+- Each round sends 3 ICMP packets → takes the median
+- Appends to a 5-round sliding window → takes the median of the window
+- Falls back to `curl` TTFB if ICMP is blocked
+
+| RTT | Color | Meaning |
+|-----|-------|---------|
+| <300ms | green | Normal |
+| 300-499ms | yellow | Degraded |
+| 500ms+ | red | High latency |
+
+A sudden TPS drop or RTT spike signals network degradation *before* you hit full retry mode — the early warning that complements the 🟢🟡🔴 indicators.
 
 ### Clickable Everything (OSC 8)
 
@@ -110,9 +139,9 @@ Three-tier visual hierarchy inspired by [Starship](https://starship.rs), [Lazygi
 └──────────────┘  └──────────────┘  └──────────────┘
 ```
 
-Quota progress bars use a separate scale: blue (<75%) → magenta (75-89%) → red (90%+).
-
+Quota bars: blue (<75%) → magenta (75-89%) → red (90%+).
 Context window: green (<70%) → yellow (70-84%) → red (85%+).
+Cost: `<$1` shows one decimal (`$0.3`), `≥$1` rounds to integer (`$10`).
 
 ---
 
@@ -121,28 +150,11 @@ Context window: green (<70%) → yellow (70-84%) → red (85%+).
 ### Quick Start (One Command)
 
 ```bash
-# Download the script
 curl -o ~/.claude/statusline-command.sh \
   https://raw.githubusercontent.com/OpenClawFarm/claude-statusline/main/claude-statusline.sh
-
-# Enable it in Claude Code
-cat >> ~/.claude/settings.json << 'EOF'
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
-  }
-}
-EOF
 ```
 
-> If you already have a `settings.json`, just add the `"statusLine"` block to it.
-
-### Manual
-
-1. Copy `claude-statusline.sh` to `~/.claude/statusline-command.sh`
-2. Make it executable: `chmod +x ~/.claude/statusline-command.sh`
-3. Add to `~/.claude/settings.json`:
+Then add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -153,11 +165,11 @@ EOF
 }
 ```
 
-4. Restart Claude Code. The status line appears immediately.
+Restart Claude Code (or wait — settings hot-reload).
 
 ### Windows (Git Bash)
 
-Works out of the box with Git Bash. Same one-command install — just make sure `jq` and `python3` are on your PATH:
+Works out of the box. Same install — just make sure `jq` and `python3` are on your PATH:
 
 ```bash
 # Install jq: https://jqlang.github.io/jq/download/
@@ -196,55 +208,63 @@ The script receives JSON from Claude Code on stdin every ~1 second:
 }
 ```
 
-For modules 1-5, 8, and 9, the script parses this JSON with `jq`.
+**Modules 1-5, 9, 10** parse this JSON with `jq`.
 
-For modules 6 (Network Health) and 7 (TPS), the script reads the session's JSONL transcript file at `~/.claude/projects/<encoded-path>/*.jsonl`. This file is written by Claude Code in real time and contains every API request, response, and error with timestamps.
+**Module 6 (Network)** and **Module 7 (TPS)** read the session's JSONL transcript at `~/.claude/projects/`. The script auto-discovers the active session across all project directories using `find -mmin -5`, so it works even after `cd` or `/add-dir`.
+
+**Module 8 (RTT)** pings `api.anthropic.com` every 30 seconds and caches the result.
 
 ### Performance Budget
 
-| Operation | Time |
-|-----------|------|
-| jq parse (x6 calls) | ~20ms |
-| git queries (x4, gc.auto=0) | ~15ms |
-| tail + grep (network check) | ~5ms |
-| python3 TPS calculation | ~30ms |
-| **Total** | **~70ms** |
+| Operation | Time | Frequency |
+|-----------|------|-----------|
+| jq parse (x6 calls) | ~20ms | every refresh |
+| git queries (x4, gc.auto=0) | ~15ms | every refresh |
+| tail + grep (network check) | ~5ms | every refresh |
+| python3 TPS calculation | ~30ms | every refresh |
+| ping (3 packets) | ~300ms | every 30s |
+| **Per refresh** | **~70ms** | |
 
-The status line refreshes every ~1 second. 70ms overhead is imperceptible.
+The status line refreshes every ~1 second. 70ms is imperceptible. The 300ms ping runs only once per 30 seconds and reads from cache otherwise.
 
 ---
 
 ## Customization
 
-The script is a single bash file — edit it directly. Common tweaks:
+The script is a single bash file — edit directly. Common tweaks:
 
-### Change Context Window Size
+### TPS Filtering
 
 ```bash
-# Line ~117-120: Adjust total context by model
+# Minimum tokens for TPS sample (default: 100)
+if ot >= 100:
+
+# TPS range filter (default: 10-500)
+if 10 <= tps <= 500: samples.append(tps)
+
+# Sliding window size (default: last 5)
+recent = samples[-5:]
+```
+
+### RTT Ping Interval
+
+```bash
+# Seconds between pings (default: 30)
+if [ "$rtt_age" -gt 30 ]; then
+```
+
+### Context Window Size
+
+```bash
 case "$model" in
     *Opus*|*opus*) ctx_total=1000 ;;   # 1M context
     *)             ctx_total=200 ;;     # 200k context
 esac
 ```
 
-### Adjust Network Sensitivity
-
-```bash
-# Line ~138: Change tail depth (more lines = wider detection window)
-tail_buf=$(tail -100 "$latest_log" 2>/dev/null)    # default: 100 lines
-
-# Line ~156: Change threshold for red indicator
-if [ "$retry_count" -ge 5 ]; then    # default: 5+ = red
-```
-
 ### Disable Modules
 
-Comment out any `*_part` variable and remove it from the assembly line at the bottom.
-
-### Remove Clickable Links
-
-Replace OSC 8 hyperlink syntax `\e]8;;URL\a...\e]8;;\a` with plain text.
+Comment out any `*_part` variable and remove from the assembly line at the bottom.
 
 ---
 
@@ -252,13 +272,14 @@ Replace OSC 8 hyperlink syntax `\e]8;;URL\a...\e]8;;\a` with plain text.
 
 | Terminal | Full Support | Notes |
 |----------|:---:|-------|
-| iTerm2 | Yes | All features including OSC 8 hyperlinks |
+| iTerm2 | Yes | All features including OSC 8 |
 | Kitty | Yes | |
 | WezTerm | Yes | |
 | Ghostty | Yes | |
-| VS Code Terminal | Partial | Colors work, OSC 8 links may not |
-| macOS Terminal.app | Partial | Colors work, no OSC 8 support |
-| tmux | Partial | Colors work, OSC 8 requires `allow-passthrough` |
+| Windows Terminal | Yes | Colors + OSC 8 |
+| VS Code Terminal | Partial | Colors work, OSC 8 may not |
+| macOS Terminal.app | Partial | Colors work, no OSC 8 |
+| tmux | Partial | OSC 8 needs `allow-passthrough` |
 
 ---
 
