@@ -130,18 +130,23 @@ fi
 # -- Network health + TPS + RTT --
 net_part=" 🟢"
 
-# Find active session (cached 10s to avoid repeated find)
-log_cache="/tmp/.claude-statusline-log"
+# Find ALL active sessions + subagents (cached 10s)
+# TPS/RTT reflect API backend quality — more sessions = better signal
+log_cache="/tmp/.claude-statusline-logs"
 log_cache_age=$(( $(date +%s) - $(stat -f %m "$log_cache" 2>/dev/null || echo 0) ))
 if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ]; then
-    find "$HOME/.claude/projects" -maxdepth 2 -name "*.jsonl" \
-        ! -path "*/subagents/*" -mmin -5 2>/dev/null \
-        | xargs command ls -1t 2>/dev/null | head -1 > "$log_cache"
+    find "$HOME/.claude/projects" -maxdepth 4 -name "*.jsonl" \
+        -mmin -5 2>/dev/null \
+        | xargs command ls -1t 2>/dev/null | head -10 > "$log_cache"
 fi
-latest_log=$(cat "$log_cache" 2>/dev/null)
+active_logs=()
+while IFS= read -r f; do
+    [ -f "$f" ] && active_logs+=("$f")
+done < "$log_cache"
 
-if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
-    tail_buf=$(tail -100 "$latest_log" 2>/dev/null)
+if [ "${#active_logs[@]}" -gt 0 ]; then
+    # Concat tail from all active sessions for broader signal
+    tail_buf=$(tail -100 "${active_logs[@]}" 2>/dev/null)
 
     # Network retry detection — pure bash, no grep forks
     last_err_ln=0
@@ -174,12 +179,12 @@ if [ -n "$latest_log" ] && [ -f "$latest_log" ]; then
         [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
     fi
 
-    # -- TPS: only recompute when log has changed --
+    # -- TPS: recompute when any log has changed --
     tps_cache="/tmp/.claude-statusline-tps"
-    log_mtime=$(stat -f %m "$latest_log" 2>/dev/null || echo 0)
+    newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
     tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
-    if [ "$log_mtime" -gt "$tps_mtime" ]; then
-        tps_val=$(tail -300 "$latest_log" 2>/dev/null | python3 -c "
+    if [ "$newest_mtime" -gt "$tps_mtime" ]; then
+        tps_val=$(tail -300 "${active_logs[@]}" 2>/dev/null | python3 -c "
 import sys, json, os
 from datetime import datetime
 prev_ts = None
@@ -205,7 +210,7 @@ for line in sys.stdin:
                 if 10 <= tps <= 500: samples.append(tps)
     if ts: prev_ts = ts
 if samples:
-    recent = samples[-5:]
+    recent = samples[-10:]
     median = sorted(recent)[len(recent)//2]
     with open(cache_path, 'a') as f: f.write(str(median) + '\n')
     with open(cache_path) as f: lines = f.read().strip().splitlines()
