@@ -185,6 +185,24 @@ if samples:
     [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
         net_part="${net_part} ${b_white}${tps_val} tps${reset}"
 fi
+# -- API RTT: ping every 30s, read from cache --
+rtt_cache="/tmp/.claude-statusline-rtt"
+rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
+if [ "$rtt_age" -gt 30 ]; then
+    # Background ping — doesn't block statusline refresh
+    (curl -o /dev/null -s -w '%{time_starttransfer}' \
+        --max-time 3 https://api.anthropic.com/v1/messages 2>/dev/null \
+        | awk '{printf "%d", $1*1000}' > "$rtt_cache") &
+fi
+if [ -f "$rtt_cache" ]; then
+    rtt_ms=$(cat "$rtt_cache" 2>/dev/null)
+    if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
+        if [ "$rtt_ms" -ge 500 ]; then rtt_c="${red}"
+        elif [ "$rtt_ms" -ge 300 ]; then rtt_c="${yellow}"
+        else rtt_c="${d_label}"; fi
+        net_part="${net_part} ${rtt_c}${rtt_ms}ms${reset}"
+    fi
+fi
 
 # -- Rate limits (5h / 7d) with reset countdown --
 rl=""
