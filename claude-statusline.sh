@@ -36,7 +36,7 @@ IFS=$'\t' read -r cwd model ctx_remaining five_h five_h_reset seven_d seven_d_re
     ] | @tsv')"
 
 [ -z "$cwd" ] && cwd=$(pwd)
-dir="${cwd/#$HOME/\~}"
+dir="${cwd/#$HOME/~}"
 model="${model:-?}"
 model="${model/Claude /}"
 model="${model/ (*)/}"
