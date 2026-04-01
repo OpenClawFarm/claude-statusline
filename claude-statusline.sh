@@ -148,6 +148,10 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
     # Concat tail from all active sessions for broader signal
     tail_buf=$(tail -100 "${active_logs[@]}" 2>/dev/null)
 
+    # Check newest log only for fresh-session detection
+    has_response=0
+    [[ "$(tail -100 "${active_logs[0]}" 2>/dev/null)" == *'"stop_reason"'* ]] && has_response=1
+
     # Network retry detection — pure bash, no grep forks
     last_err_ln=0
     last_ok_ln=0
@@ -179,8 +183,8 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
         [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
     fi
 
-    # -- TPS: skip if no completed responses yet (fresh session) --
-    if [ "$last_ok_ln" -gt 0 ]; then
+    # -- TPS: skip if no completed responses in current session --
+    if [ "$has_response" -eq 1 ]; then
         tps_cache="/tmp/.claude-statusline-tps"
         newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
         tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
@@ -229,8 +233,8 @@ if samples:
     fi
 fi
 
-# -- API RTT: only after first response (skip fresh session) --
-if [ "$last_ok_ln" -gt 0 ] 2>/dev/null; then
+# -- API RTT: only after first response in current session --
+if [ "${has_response:-0}" -eq 1 ]; then
     rtt_cache="/tmp/.claude-statusline-rtt"
     rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
     if [ "$rtt_age" -gt 5 ]; then
