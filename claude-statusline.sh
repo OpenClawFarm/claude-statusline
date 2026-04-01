@@ -210,7 +210,7 @@ for line in sys.stdin:
                 if 10 <= tps <= 500: samples.append(tps)
     if ts: prev_ts = ts
 if samples:
-    recent = samples[-10:]
+    recent = samples[-5:]
     median = sorted(recent)[len(recent)//2]
     with open(cache_path, 'a') as f: f.write(str(median) + '\n')
     with open(cache_path) as f: lines = f.read().strip().splitlines()
@@ -238,7 +238,7 @@ if [ "$rtt_age" -gt 5 ]; then
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
     if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
-        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -20 > "$rtt_cache.tmp" \
+        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -5 > "$rtt_cache.tmp" \
             && mv "$rtt_cache.tmp" "$rtt_cache"
     fi
 fi
