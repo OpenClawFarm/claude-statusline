@@ -112,7 +112,7 @@ effort_part=""
 
 # -- Context Window (Xk) --
 ctx_part=""
-if [ -n "$ctx_remaining" ]; then
+if [ -n "$ctx_remaining" ] && [ "${ctx_remaining%.*}" -gt 0 ] 2>/dev/null; then
     ctx_pct=$(( 100 - ${ctx_remaining%.*} ))
     [ "$ctx_pct" -lt 0 ] && ctx_pct=0
     [ "$ctx_pct" -gt 100 ] && ctx_pct=100
