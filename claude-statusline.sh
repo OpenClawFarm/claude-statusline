@@ -112,7 +112,11 @@ effort_part=""
 
 # -- Context Window (Xk) --
 ctx_part=""
-if [ -n "$ctx_remaining" ] && [ "${ctx_remaining%.*}" -gt 0 ] 2>/dev/null; then
+# -- Everything below only shows after CC provides real usage data --
+has_usage=0
+[ -n "$ctx_remaining" ] && [ "${ctx_remaining%.*}" -gt 0 ] 2>/dev/null && has_usage=1
+
+if [ "$has_usage" -eq 1 ]; then
     ctx_pct=$(( 100 - ${ctx_remaining%.*} ))
     [ "$ctx_pct" -lt 0 ] && ctx_pct=0
     [ "$ctx_pct" -gt 100 ] && ctx_pct=100
@@ -127,13 +131,16 @@ if [ -n "$ctx_remaining" ] && [ "${ctx_remaining%.*}" -gt 0 ] 2>/dev/null; then
     ctx_part=" ${ctx_c}${ctx_k}k${reset}"
 fi
 
-# -- Network health + TPS + RTT --
+# -- Network health + TPS + RTT (only with usage data) --
+net_part=""
+
+if [ "$has_usage" -eq 1 ]; then
 net_part=" 🟢"
 
-# Find ALL active sessions + subagents (cached 10s, forced refresh on init)
+# Find ALL active sessions + subagents (cached 10s)
 log_cache="/tmp/.claude-statusline-logs"
 log_cache_age=$(( $(date +%s) - $(stat -f %m "$log_cache" 2>/dev/null || echo 0) ))
-if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ] || [ -z "$cost_usd" ]; then
+if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ]; then
     find "$HOME/.claude/projects" -maxdepth 4 -name "*.jsonl" \
         -mmin -5 2>/dev/null \
         | xargs command ls -1t 2>/dev/null | head -10 > "$log_cache"
@@ -146,18 +153,6 @@ done < "$log_cache"
 if [ "${#active_logs[@]}" -gt 0 ]; then
     # Concat tail from all active sessions for broader signal
     tail_buf=$(tail -100 "${active_logs[@]}" 2>/dev/null)
-
-    # Session change detection: clear stale caches on new session
-    session_tracker="/tmp/.claude-statusline-session"
-    prev_session=$(cat "$session_tracker" 2>/dev/null)
-    curr_session="${active_logs[0]}"
-    has_response=0
-    if [ "$curr_session" != "$prev_session" ]; then
-        # New session — clear old caches
-        echo "$curr_session" > "$session_tracker"
-        rm -f /tmp/.claude-statusline-tps /tmp/.claude-statusline-tps-history /tmp/.claude-statusline-rtt
-    fi
-    [[ "$(tail -100 "$curr_session" 2>/dev/null)" == *'"stop_reason"'* ]] && has_response=1
 
     # Network retry detection — pure bash, no grep forks
     last_err_ln=0
@@ -190,13 +185,12 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
         [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
     fi
 
-    # -- TPS: skip if no completed responses in current session --
-    if [ "$has_response" -eq 1 ]; then
-        tps_cache="/tmp/.claude-statusline-tps"
-        newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
-        tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
-        if [ "$newest_mtime" -gt "$tps_mtime" ]; then
-            tps_val=$(tail -300 "${active_logs[@]}" 2>/dev/null | python3 -c "
+    # -- TPS --
+    tps_cache="/tmp/.claude-statusline-tps"
+    newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
+    tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
+    if [ "$newest_mtime" -gt "$tps_mtime" ]; then
+        tps_val=$(tail -300 "${active_logs[@]}" 2>/dev/null | python3 -c "
 import sys, json, os
 from datetime import datetime
 prev_ts = None
@@ -230,42 +224,41 @@ if samples:
         with open(cache_path, 'w') as f: f.write('\n'.join(lines[-10:]) + '\n')
     print(median)
 " 2>/dev/null)
-            if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
-                echo "$tps_val" > "$tps_cache"
-            fi
+        if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
+            echo "$tps_val" > "$tps_cache"
         fi
-        tps_val=$(cat "$tps_cache" 2>/dev/null)
-        [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
-            net_part="${net_part} ${b_white}${tps_val} tps${reset}"
     fi
+    tps_val=$(cat "$tps_cache" 2>/dev/null)
+    [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
+        net_part="${net_part} ${b_white}${tps_val} tps${reset}"
 fi
 
-# -- API RTT: only after first response in current session --
-if [ "${has_response:-0}" -eq 1 ]; then
-    rtt_cache="/tmp/.claude-statusline-rtt"
-    rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
-    if [ "$rtt_age" -gt 5 ]; then
-        rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
-            | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
-        [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
-            --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
-            | awk '{printf "%d", $1*1000}')
-        if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
-            { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -3 > "$rtt_cache.tmp" \
-                && mv "$rtt_cache.tmp" "$rtt_cache"
-        fi
-    fi
-    rtt_ms=""
-    if [ -f "$rtt_cache" ]; then
-        rtt_ms=$(sort -n "$rtt_cache" | awk '{a[NR]=$1} END{print a[int(NR/2)+1]}')
-    fi
-    if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
-        if [ "$rtt_ms" -ge 500 ]; then rtt_c="${red}"
-        elif [ "$rtt_ms" -ge 300 ]; then rtt_c="${yellow}"
-        else rtt_c="${green}"; fi
-        net_part="${net_part} ${rtt_c}${rtt_ms}ms${reset}"
+# -- API RTT --
+rtt_cache="/tmp/.claude-statusline-rtt"
+rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
+if [ "$rtt_age" -gt 5 ]; then
+    rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
+        | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
+    [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
+        --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
+        | awk '{printf "%d", $1*1000}')
+    if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
+        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -3 > "$rtt_cache.tmp" \
+            && mv "$rtt_cache.tmp" "$rtt_cache"
     fi
 fi
+rtt_ms=""
+if [ -f "$rtt_cache" ]; then
+    rtt_ms=$(sort -n "$rtt_cache" | awk '{a[NR]=$1} END{print a[int(NR/2)+1]}')
+fi
+if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
+    if [ "$rtt_ms" -ge 500 ]; then rtt_c="${red}"
+    elif [ "$rtt_ms" -ge 300 ]; then rtt_c="${yellow}"
+    else rtt_c="${green}"; fi
+    net_part="${net_part} ${rtt_c}${rtt_ms}ms${reset}"
+fi
+
+fi # has_usage gate for network/TPS/RTT
 
 # -- Rate limits --
 rl=""
@@ -286,14 +279,14 @@ fmt_reset() {
         printf "%b" "\033[37m${m}m${reset}"
     fi
 }
-if [ -n "$five_h" ]; then
+if [ "$has_usage" -eq 1 ] && [ -n "$five_h" ]; then
     f=${five_h%.*}
     if [ "$f" -ge 0 ] 2>/dev/null && [ "$f" -le 100 ]; then
         rl=" ${d_sep}│${reset} \033[37m5h${reset} $(bar $f 6 quota) $(cpct $f quota)"
         [ -n "$five_h_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$five_h_reset")"
     fi
 fi
-if [ -n "$seven_d" ]; then
+if [ "$has_usage" -eq 1 ] && [ -n "$seven_d" ]; then
     s=${seven_d%.*}
     if [ "$s" -ge 0 ] 2>/dev/null && [ "$s" -le 100 ]; then
         rl="${rl} \033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota)"
@@ -303,7 +296,7 @@ fi
 
 # -- Cost --
 cost_part=""
-if [ -n "$cost_usd" ]; then
+if [ "$has_usage" -eq 1 ] && [ -n "$cost_usd" ]; then
     cost_int=${cost_usd%%.*}
     if [ "${cost_int:-0}" -lt 1 ]; then
         cost_fmt=$(printf '%.1f' "$cost_usd")
