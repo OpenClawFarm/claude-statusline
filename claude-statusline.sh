@@ -130,11 +130,10 @@ fi
 # -- Network health + TPS + RTT --
 net_part=" 🟢"
 
-# Find ALL active sessions + subagents (cached 10s)
-# TPS/RTT reflect API backend quality — more sessions = better signal
+# Find ALL active sessions + subagents (cached 10s, forced refresh on init)
 log_cache="/tmp/.claude-statusline-logs"
 log_cache_age=$(( $(date +%s) - $(stat -f %m "$log_cache" 2>/dev/null || echo 0) ))
-if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ]; then
+if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ] || [ -z "$cost_usd" ]; then
     find "$HOME/.claude/projects" -maxdepth 4 -name "*.jsonl" \
         -mmin -5 2>/dev/null \
         | xargs command ls -1t 2>/dev/null | head -10 > "$log_cache"
