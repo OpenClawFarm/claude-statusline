@@ -148,9 +148,17 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
     # Concat tail from all active sessions for broader signal
     tail_buf=$(tail -100 "${active_logs[@]}" 2>/dev/null)
 
-    # Check newest log only for fresh-session detection
+    # Session change detection: clear stale caches on new session
+    session_tracker="/tmp/.claude-statusline-session"
+    prev_session=$(cat "$session_tracker" 2>/dev/null)
+    curr_session="${active_logs[0]}"
     has_response=0
-    [[ "$(tail -100 "${active_logs[0]}" 2>/dev/null)" == *'"stop_reason"'* ]] && has_response=1
+    if [ "$curr_session" != "$prev_session" ]; then
+        # New session — clear old caches
+        echo "$curr_session" > "$session_tracker"
+        rm -f /tmp/.claude-statusline-tps /tmp/.claude-statusline-tps-history /tmp/.claude-statusline-rtt
+    fi
+    [[ "$(tail -100 "$curr_session" 2>/dev/null)" == *'"stop_reason"'* ]] && has_response=1
 
     # Network retry detection — pure bash, no grep forks
     last_err_ln=0
