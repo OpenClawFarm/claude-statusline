@@ -43,11 +43,23 @@ Add to `~/.claude/settings.json`:
 
 Restart Claude Code. Requires **jq** and **Python 3.9+**.
 
+<details>
+<summary>Windows (Git Bash)</summary>
+
+```powershell
+winget install jqlang.jq
+winget install Python.Python.3.13
+```
+
+The script auto-detects Windows and adjusts `stat`, `ping`, cache paths, and Python/jq lookup. No manual patching needed.
+
+</details>
+
 ## How It Works
 
 Claude Code pipes JSON to the script every ~1s. Modules 1–5, 9, 10 parse it with `jq`. The remaining modules work differently:
 
-**Network (6)** — Reads the JSONL session transcript using positional comparison: if the last `retryInMs` appears after the last `stop_reason`, the session is retrying. Error tags (`rst`, `cert`, `504`) indicate what to fix. Auto-discovers active sessions across all project directories. Inspired by [claudebubble](https://github.com/limin112/claudebubble).
+**Network (6)** — Reads the JSONL session transcript using positional comparison: if the last `retryInMs` appears after the last `stop_reason`, the session is retrying. After recovery, recent retry count is retained (e.g. `🟢3`) so transient issues are visible. Error tags (`rst`, `cert`, `504`) indicate what to fix. Auto-discovers active sessions across all project directories. Inspired by [claudebubble](https://github.com/limin112/claudebubble).
 
 **TPS (7)** — Calculates `output_tokens / streaming_time` from JSONL, excluding tool execution time. Filters: ≥100 tokens (≥10 during cold start), ≥0.3s, 10–500 tps range. Sliding window median over last 3 samples. Aggregates across all active sessions.
 
@@ -60,7 +72,7 @@ Claude Code pipes JSON to the script every ~1s. Modules 1–5, 9, 10 parse it wi
 | Context | <70% used | 70–84% | 85%+ |
 | Quota bars | <75% used | 75–89% | 90%+ |
 | RTT | <300ms | 300–499ms | 500ms+ |
-| Network | 🟢 clear | 🟡 1–4 retries | 🔴 5+ retries |
+| Network | 🟢 clear / 🟢*n* recovered | 🟡 1–4 retries | 🔴 5+ retries |
 
 ## Compatibility
 

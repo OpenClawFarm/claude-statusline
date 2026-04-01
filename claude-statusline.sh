@@ -22,6 +22,22 @@ bright_mag='\033[95m'
 d_sep='\033[2;90m'
 d_label='\033[2;37m'
 
+# -- Platform detection & helpers --
+_is_windows() { [[ "$OSTYPE" == msys* || "$OSTYPE" == mingw* ]]; }
+_stat_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+
+if _is_windows; then
+    _winuser="${HOME##*/}"
+    export PATH="/c/Users/${_winuser}/AppData/Local/Microsoft/WinGet/Links:$PATH"
+    export PATH="/c/Users/${_winuser}/AppData/Local/Programs/Python/Python313:$PATH"
+    PYTHON=$(command -v python 2>/dev/null || command -v python3 2>/dev/null || echo python3)
+else
+    PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
+fi
+
+_CACHE_DIR="$HOME/.claude"
+[ -d "$_CACHE_DIR" ] || mkdir -p "$_CACHE_DIR"
+
 # -- Parse all CC JSON fields in a single jq call --
 IFS=$'\t' read -r cwd model ctx_remaining five_h five_h_reset seven_d seven_d_reset cost_usd <<< \
     "$(echo "$input" | jq -r '[
@@ -138,12 +154,15 @@ if [ "$has_usage" -eq 1 ]; then
 net_part=" 🟢"
 
 # Find ALL active sessions + subagents (cached 10s)
-log_cache="/tmp/.claude-statusline-logs"
-log_cache_age=$(( $(date +%s) - $(stat -f %m "$log_cache" 2>/dev/null || echo 0) ))
+log_cache="$_CACHE_DIR/.sl-logs"
+log_cache_age=$(( $(date +%s) - $(_stat_mtime "$log_cache") ))
 if [ "$log_cache_age" -gt 10 ] || [ ! -f "$log_cache" ]; then
     find "$HOME/.claude/projects" -maxdepth 4 -name "*.jsonl" \
         -mmin -5 2>/dev/null \
-        | xargs command ls -1t 2>/dev/null | head -10 > "$log_cache"
+        | while IFS= read -r f; do
+            printf '%s %s\n' "$(_stat_mtime "$f")" "$f"
+          done \
+        | sort -rn | head -10 | cut -d' ' -f2- > "$log_cache"
 fi
 active_logs=()
 while IFS= read -r f; do
@@ -152,7 +171,7 @@ done < "$log_cache"
 
 if [ "${#active_logs[@]}" -gt 0 ]; then
     # Concat tail from all active sessions for broader signal
-    tail_buf=$(tail -100 "${active_logs[@]}" 2>/dev/null)
+    tail_buf=$(for f in "${active_logs[@]}"; do tail -100 "$f" 2>/dev/null; done)
 
     # Network retry detection — pure bash, no grep forks
     last_err_ln=0
@@ -172,30 +191,36 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
         [[ "$line" == *'"stop_reason"'* ]] && last_ok_ln=$ln
     done <<< "$tail_buf"
 
+    err_tag=""
+    [ "$has_cert" -eq 1 ] && err_tag="cert"
+    [ "$has_rst" -eq 1 ] && [ -z "$err_tag" ] && err_tag="rst"
+    [ "$has_504" -eq 1 ] && [ -z "$err_tag" ] && err_tag="504"
+
     if [ "$last_err_ln" -gt "$last_ok_ln" ] && [ "$last_err_ln" -gt 0 ]; then
-        err_tag=""
-        [ "$has_cert" -eq 1 ] && err_tag="cert"
-        [ "$has_rst" -eq 1 ] && [ -z "$err_tag" ] && err_tag="rst"
-        [ "$has_504" -eq 1 ] && [ -z "$err_tag" ] && err_tag="504"
-        if [ "$retry_count" -ge 3 ]; then
+        # Currently retrying
+        if [ "$retry_count" -ge 5 ]; then
             net_part=" 🔴${red}${retry_count}${reset}"
         else
             net_part=" 🟡${yellow}${retry_count}${reset}"
         fi
         [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
+    elif [ "$retry_count" -gt 0 ]; then
+        # Recovered, but had recent retries
+        net_part=" 🟢${green}${retry_count}${reset}"
+        [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
     fi
 
     # -- TPS --
-    tps_cache="/tmp/.claude-statusline-tps"
-    newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
-    tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
+    tps_cache="$_CACHE_DIR/.sl-tps"
+    newest_mtime=$(_stat_mtime "${active_logs[0]}")
+    tps_mtime=$(_stat_mtime "$tps_cache")
     if [ "$newest_mtime" -gt "$tps_mtime" ]; then
-        tps_val=$(tail -300 "${active_logs[@]}" 2>/dev/null | python3 -c "
+        tps_val=$(for f in "${active_logs[@]}"; do tail -300 "$f" 2>/dev/null; done | "$PYTHON" -c "
 import sys, json, os
 from datetime import datetime
 prev_ts = None
 samples = []
-cache_path = '/tmp/.claude-statusline-tps-history'
+cache_path = os.path.expanduser('~/.claude/.sl-tps-history')
 cached_count = 0
 if os.path.exists(cache_path):
     with open(cache_path) as f:
@@ -234,11 +259,16 @@ if samples:
 fi
 
 # -- API RTT --
-rtt_cache="/tmp/.claude-statusline-rtt"
-rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
+rtt_cache="$_CACHE_DIR/.sl-rtt"
+rtt_age=$(( $(date +%s) - $(_stat_mtime "$rtt_cache") ))
 if [ "$rtt_age" -gt 5 ]; then
-    rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
-        | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
+    if _is_windows; then
+        rtt_fresh=$(ping -n 1 -w 2000 api.anthropic.com 2>/dev/null \
+            | grep -o 'time[<=][0-9]*' | grep -o '[0-9]*$' | head -1)
+    else
+        rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
+            | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
+    fi
     [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
