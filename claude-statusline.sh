@@ -179,12 +179,13 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
         [ -n "$err_tag" ] && net_part="${net_part}${d_label}${err_tag}${reset}"
     fi
 
-    # -- TPS: recompute when any log has changed --
-    tps_cache="/tmp/.claude-statusline-tps"
-    newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
-    tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
-    if [ "$newest_mtime" -gt "$tps_mtime" ]; then
-        tps_val=$(tail -300 "${active_logs[@]}" 2>/dev/null | python3 -c "
+    # -- TPS: skip if no completed responses yet (fresh session) --
+    if [ "$last_ok_ln" -gt 0 ]; then
+        tps_cache="/tmp/.claude-statusline-tps"
+        newest_mtime=$(stat -f %m "${active_logs[0]}" 2>/dev/null || echo 0)
+        tps_mtime=$(stat -f %m "$tps_cache" 2>/dev/null || echo 0)
+        if [ "$newest_mtime" -gt "$tps_mtime" ]; then
+            tps_val=$(tail -300 "${active_logs[@]}" 2>/dev/null | python3 -c "
 import sys, json, os
 from datetime import datetime
 prev_ts = None
@@ -218,39 +219,41 @@ if samples:
         with open(cache_path, 'w') as f: f.write('\n'.join(lines[-10:]) + '\n')
     print(median)
 " 2>/dev/null)
-        if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
-            echo "$tps_val" > "$tps_cache"
+            if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
+                echo "$tps_val" > "$tps_cache"
+            fi
         fi
+        tps_val=$(cat "$tps_cache" 2>/dev/null)
+        [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
+            net_part="${net_part} ${b_white}${tps_val} tps${reset}"
     fi
-    tps_val=$(cat "$tps_cache" 2>/dev/null)
-    [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null && \
-        net_part="${net_part} ${b_white}${tps_val} tps${reset}"
 fi
 
-# -- API RTT: ping with adaptive interval, sliding window median --
-rtt_cache="/tmp/.claude-statusline-rtt"
-rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
-if [ "$rtt_age" -gt 5 ]; then
-    # Single packet, 2s timeout — never blocks more than 2s
-    rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
-        | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
-    [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
-        --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
-        | awk '{printf "%d", $1*1000}')
-    if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
-        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -3 > "$rtt_cache.tmp" \
-            && mv "$rtt_cache.tmp" "$rtt_cache"
+# -- API RTT: only after first response (skip fresh session) --
+if [ "$last_ok_ln" -gt 0 ] 2>/dev/null; then
+    rtt_cache="/tmp/.claude-statusline-rtt"
+    rtt_age=$(( $(date +%s) - $(stat -f %m "$rtt_cache" 2>/dev/null || echo 0) ))
+    if [ "$rtt_age" -gt 5 ]; then
+        rtt_fresh=$(ping -c 1 -W 2 api.anthropic.com 2>/dev/null \
+            | grep -o 'time=[0-9.]*' | cut -d= -f2 | awk '{printf "%d", $1}')
+        [ -z "$rtt_fresh" ] && rtt_fresh=$(curl -o /dev/null -s -w '%{time_starttransfer}' \
+            --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
+            | awk '{printf "%d", $1*1000}')
+        if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
+            { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -3 > "$rtt_cache.tmp" \
+                && mv "$rtt_cache.tmp" "$rtt_cache"
+        fi
     fi
-fi
-rtt_ms=""
-if [ -f "$rtt_cache" ]; then
-    rtt_ms=$(sort -n "$rtt_cache" | awk '{a[NR]=$1} END{print a[int(NR/2)+1]}')
-fi
-if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
-    if [ "$rtt_ms" -ge 500 ]; then rtt_c="${red}"
-    elif [ "$rtt_ms" -ge 300 ]; then rtt_c="${yellow}"
-    else rtt_c="${green}"; fi
-    net_part="${net_part} ${rtt_c}${rtt_ms}ms${reset}"
+    rtt_ms=""
+    if [ -f "$rtt_cache" ]; then
+        rtt_ms=$(sort -n "$rtt_cache" | awk '{a[NR]=$1} END{print a[int(NR/2)+1]}')
+    fi
+    if [ -n "$rtt_ms" ] && [ "$rtt_ms" -gt 0 ] 2>/dev/null; then
+        if [ "$rtt_ms" -ge 500 ]; then rtt_c="${red}"
+        elif [ "$rtt_ms" -ge 300 ]; then rtt_c="${yellow}"
+        else rtt_c="${green}"; fi
+        net_part="${net_part} ${rtt_c}${rtt_ms}ms${reset}"
+    fi
 fi
 
 # -- Rate limits --
