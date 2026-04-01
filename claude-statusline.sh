@@ -210,7 +210,7 @@ for line in sys.stdin:
                 if 10 <= tps <= 500: samples.append(tps)
     if ts: prev_ts = ts
 if samples:
-    recent = samples[-5:]
+    recent = samples[-3:]
     median = sorted(recent)[len(recent)//2]
     with open(cache_path, 'a') as f: f.write(str(median) + '\n')
     with open(cache_path) as f: lines = f.read().strip().splitlines()
@@ -238,7 +238,7 @@ if [ "$rtt_age" -gt 5 ]; then
         --max-time 2 https://api.anthropic.com/v1/messages 2>/dev/null \
         | awk '{printf "%d", $1*1000}')
     if [ -n "$rtt_fresh" ] && [ "$rtt_fresh" -gt 0 ] 2>/dev/null; then
-        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -5 > "$rtt_cache.tmp" \
+        { cat "$rtt_cache" 2>/dev/null; echo "$rtt_fresh"; } | tail -3 > "$rtt_cache.tmp" \
             && mv "$rtt_cache.tmp" "$rtt_cache"
     fi
 fi
@@ -274,13 +274,17 @@ fmt_reset() {
 }
 if [ -n "$five_h" ]; then
     f=${five_h%.*}
-    rl=" ${d_sep}│${reset} \033[37m5h${reset} $(bar $f 6 quota) $(cpct $f quota)"
-    [ -n "$five_h_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$five_h_reset")"
+    if [ "$f" -ge 0 ] 2>/dev/null && [ "$f" -le 100 ]; then
+        rl=" ${d_sep}│${reset} \033[37m5h${reset} $(bar $f 6 quota) $(cpct $f quota)"
+        [ -n "$five_h_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$five_h_reset")"
+    fi
 fi
 if [ -n "$seven_d" ]; then
     s=${seven_d%.*}
-    rl="${rl} \033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota)"
-    [ -n "$seven_d_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$seven_d_reset")"
+    if [ "$s" -ge 0 ] 2>/dev/null && [ "$s" -le 100 ]; then
+        rl="${rl} \033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota)"
+        [ -n "$seven_d_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$seven_d_reset")"
+    fi
 fi
 
 # -- Cost --
