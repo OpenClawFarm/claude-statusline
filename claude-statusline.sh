@@ -177,7 +177,7 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
         [ "$has_cert" -eq 1 ] && err_tag="cert"
         [ "$has_rst" -eq 1 ] && [ -z "$err_tag" ] && err_tag="rst"
         [ "$has_504" -eq 1 ] && [ -z "$err_tag" ] && err_tag="504"
-        if [ "$retry_count" -ge 5 ]; then
+        if [ "$retry_count" -ge 3 ]; then
             net_part=" 🔴${red}${retry_count}${reset}"
         else
             net_part=" 🟡${yellow}${retry_count}${reset}"
