@@ -61,7 +61,7 @@ Claude Code pipes JSON to the script every ~1s. Modules 1–5, 9, 10 parse it wi
 
 **Network (6)** — Reads the JSONL session transcript using positional comparison: if the last `retryInMs` appears after the last `stop_reason`, the session is retrying. After recovery, recent retry count is retained (e.g. `🟢3`) so transient issues are visible. Error tags (`rst`, `cert`, `504`) indicate what to fix. Auto-discovers active sessions across all project directories. Inspired by [claudebubble](https://github.com/limin112/claudebubble).
 
-**TPS (7)** — Calculates `output_tokens / streaming_time` from JSONL, excluding tool execution time. Filters: ≥100 tokens (≥10 during cold start), ≥0.3s, 10–500 tps range. Sliding window median over last 3 samples. Aggregates across all active sessions.
+**TPS (7)** — Calculates `output_tokens / streaming_time` from JSONL, excluding tool execution time. Multi-block responses (thinking/text/tool_use) are grouped by `message.id` and timed from before the first block. Token-weighted average over the 5 most recent responses across all active sessions (`sum(tokens) / sum(seconds)`), so long responses dominate and TTFT noise averages out. Per-sample sanity filters: >0.3s, 10–800 tps. Recomputed at most every 3s.
 
 **RTT (8)** — Pings `api.anthropic.com` every 5s (single ICMP packet, 2s timeout). Sliding window median over last 3 rounds. Falls back to `curl` TTFB if ICMP is blocked.
 

@@ -217,41 +217,46 @@ if [ "${#active_logs[@]}" -gt 0 ]; then
     tps_cache="$_CACHE_DIR/.sl-tps"
     newest_mtime=$(_stat_mtime "${active_logs[0]}")
     tps_mtime=$(_stat_mtime "$tps_cache")
-    if [ "$newest_mtime" -gt "$tps_mtime" ]; then
-        tps_val=$(for f in "${active_logs[@]}"; do tail -300 "$f" 2>/dev/null; done | "$PYTHON" -c "
-import sys, json, os
+    tps_age=$(( $(date +%s) - tps_mtime ))
+    if [ "$newest_mtime" -gt "$tps_mtime" ] && [ "$tps_age" -gt 3 ]; then
+        tps_val=$("$PYTHON" -c "
+import sys, json
 from datetime import datetime
-prev_ts = None
-samples = []
-cache_path = os.path.expanduser('~/.claude/.sl-tps-history')
-cached_count = 0
-if os.path.exists(cache_path):
-    with open(cache_path) as f:
-        cached_count = len(f.read().strip().splitlines())
-min_tokens = 10 if cached_count < 5 else 100
-for line in sys.stdin:
-    try: d = json.loads(line)
-    except: continue
-    ts = d.get('timestamp')
-    if d.get('type') == 'assistant' and d.get('message',{}).get('stop_reason') and prev_ts:
-        ot = d.get('message',{}).get('usage',{}).get('output_tokens',0)
-        if ot >= min_tokens:
-            t1 = datetime.fromisoformat(prev_ts.replace('Z','+00:00'))
-            t2 = datetime.fromisoformat(ts.replace('Z','+00:00'))
-            dt = (t2-t1).total_seconds()
-            if dt > 0.3:
-                tps = int(ot/dt)
-                if 10 <= tps <= 500: samples.append(tps)
-    if ts: prev_ts = ts
-if samples:
-    recent = samples[-3:]
-    median = sorted(recent)[len(recent)//2]
-    with open(cache_path, 'a') as f: f.write(str(median) + '\n')
-    with open(cache_path) as f: lines = f.read().strip().splitlines()
-    if len(lines) > 10:
-        with open(cache_path, 'w') as f: f.write('\n'.join(lines[-10:]) + '\n')
-    print(median)
-" 2>/dev/null)
+
+def parse(ts): return datetime.fromisoformat(ts.replace('Z','+00:00'))
+
+seen = {}  # message id -> (end_ts, output_tokens, streaming_seconds)
+for path in sys.argv[1:]:
+    try:
+        with open(path, encoding='utf-8') as f: lines = f.readlines()[-300:]
+    except OSError: continue
+    prev_ts = None    # timestamp of previous JSONL record
+    cur_id = None     # assistant message id currently streaming
+    cur_start = None  # record timestamp just before its first block
+    for line in lines:
+        try: d = json.loads(line)
+        except: continue
+        ts = d.get('timestamp')
+        msg = d.get('message', {})
+        # One API response spans multiple assistant records (thinking/text/
+        # tool_use) sharing message.id and usage; time it from before the
+        # first block, and keep only the last record per id (full span).
+        if d.get('type') == 'assistant' and ts:
+            if msg.get('id') != cur_id:
+                cur_id, cur_start = msg.get('id'), prev_ts
+            if msg.get('stop_reason') and cur_start:
+                ot = msg.get('usage', {}).get('output_tokens', 0)
+                dt = (parse(ts) - parse(cur_start)).total_seconds()
+                if ot > 0 and dt > 0.3 and 10 <= ot/dt <= 800:
+                    seen[cur_id] = (ts, ot, dt)
+        if ts: prev_ts = ts
+
+samples = sorted(seen.values())  # ISO-8601 UTC sorts chronologically
+recent = samples[-5:]
+tok = sum(s[1] for s in recent)
+sec = sum(s[2] for s in recent)
+if tok >= 100: print(int(tok/sec))
+" "${active_logs[@]}" 2>/dev/null)
         if [ -n "$tps_val" ] && [ "$tps_val" -gt 0 ] 2>/dev/null; then
             echo "$tps_val" > "$tps_cache"
         fi
