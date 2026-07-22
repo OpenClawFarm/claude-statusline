@@ -1,9 +1,9 @@
 # claude-statusline
 
-A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — model, context, network, throughput, latency, quotas, and cost in one status line.
+A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — model, context, network, throughput, latency, and quotas in one status line.
 
 ```
-📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d  $0.3
+📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d  Fable ██░░░░ 28%
 ```
 
 ## Modules
@@ -19,7 +19,7 @@ A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 | 7 | TPS | `55 tps` | JSONL |
 | 8 | RTT | `173ms` | ping |
 | 9 | Quotas | `5h ██░░░░ 32%` | CC JSON |
-| 10 | Cost | `$0.3` | CC JSON |
+| 10 | Fable weekly | `Fable ██░░░░ 28%` | OAuth usage API |
 
 Directory, git branch, and effort level are clickable via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) (iTerm2, Kitty, WezTerm, Ghostty, Windows Terminal).
 
@@ -57,13 +57,15 @@ The script auto-detects Windows and adjusts `stat`, `ping`, cache paths, and Pyt
 
 ## How It Works
 
-Claude Code pipes JSON to the script every ~1s. Modules 1–5, 9, 10 parse it with `jq`. The remaining modules work differently:
+Claude Code pipes JSON to the script every ~1s. Modules 1–5 and 9 parse it with `jq`. The remaining modules work differently:
 
 **Network (6)** — Reads the JSONL session transcript using positional comparison: if the last `retryInMs` appears after the last `stop_reason`, the session is retrying. After recovery, recent retry count is retained (e.g. `🟢3`) so transient issues are visible. Error tags (`rst`, `cert`, `504`) indicate what to fix. Auto-discovers active sessions across all project directories. Inspired by [claudebubble](https://github.com/limin112/claudebubble).
 
 **TPS (7)** — Calculates `output_tokens / streaming_time` from JSONL, excluding tool execution time. Multi-block responses (thinking/text/tool_use) are grouped by `message.id` and timed from before the first block. Token-weighted average over the 5 most recent responses across all active sessions (`sum(tokens) / sum(seconds)`), so long responses dominate and TTFT noise averages out. Per-sample sanity filters: >0.3s, 10–800 tps. Recomputed at most every 3s.
 
 **RTT (8)** — Pings `api.anthropic.com` every 5s (single ICMP packet, 2s timeout). Sliding window median over last 3 rounds. Falls back to `curl` TTFB if ICMP is blocked.
+
+**Fable weekly (10)** — Queries Anthropic's OAuth usage API for the Fable-scoped weekly limit, reusing the Claude Code OAuth token from the macOS keychain (or `~/.claude/.credentials.json`). Cached 60s and refreshed in a background subshell so the status line never blocks. Hidden if the account has no Fable weekly quota.
 
 ## Color Coding
 

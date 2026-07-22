@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code Statusline - designed for leecz
-# Version: 2.0.0
+# Version: 2.2.0 (removed cost display — total_cost_usd is inaccurate)
 # Color scheme inspired by Starship / Lazygit / btop
 # Optimized: ~45 forks → ~12 forks per refresh
 
@@ -39,7 +39,7 @@ _CACHE_DIR="$HOME/.claude"
 [ -d "$_CACHE_DIR" ] || mkdir -p "$_CACHE_DIR"
 
 # -- Parse all CC JSON fields in a single jq call --
-IFS=$'\t' read -r cwd model ctx_remaining five_h five_h_reset seven_d seven_d_reset cost_usd <<< \
+IFS=$'\t' read -r cwd model ctx_remaining five_h five_h_reset seven_d seven_d_reset <<< \
     "$(echo "$input" | jq -r '[
         (.workspace.current_dir // .cwd // ""),
         (.model.display_name // ""),
@@ -47,8 +47,7 @@ IFS=$'\t' read -r cwd model ctx_remaining five_h five_h_reset seven_d seven_d_re
         (.rate_limits.five_hour.used_percentage // ""),
         (.rate_limits.five_hour.resets_at // ""),
         (.rate_limits.seven_day.used_percentage // ""),
-        (.rate_limits.seven_day.resets_at // ""),
-        (.cost.total_cost_usd // "")
+        (.rate_limits.seven_day.resets_at // "")
     ] | @tsv')"
 
 [ -z "$cwd" ] && cwd=$(pwd)
@@ -298,6 +297,31 @@ fi
 
 fi # has_usage gate for network/TPS/RTT
 
+# -- Fable weekly quota (OAuth usage API `limits[].weekly_scoped`, cached 60s, refreshed in background) --
+fable_pct=""
+if [ "$has_usage" -eq 1 ]; then
+    fable_cache="$_CACHE_DIR/.sl-fable"
+    fable_age=$(( $(date +%s) - $(_stat_mtime "$fable_cache") ))
+    if [ "$fable_age" -gt 60 ]; then
+        (
+            tok=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
+                  | jq -r '.claudeAiOauth.accessToken // empty')
+            [ -z "$tok" ] && tok=$(jq -r '.claudeAiOauth.accessToken // empty' \
+                  "$HOME/.claude/.credentials.json" 2>/dev/null)
+            if [ -n "$tok" ]; then
+                pct=$(curl -s --max-time 3 \
+                      -H "Authorization: Bearer $tok" \
+                      -H "anthropic-beta: oauth-2025-04-20" \
+                      https://api.anthropic.com/api/oauth/usage 2>/dev/null \
+                      | jq -r '[.limits[]? | select(.kind == "weekly_scoped"
+                          and (.scope.model.display_name // "" | test("fable"; "i")))][0].percent // empty' 2>/dev/null)
+                [ -n "$pct" ] && echo "$pct" > "$fable_cache"
+            fi
+        ) >/dev/null 2>&1 &
+    fi
+    fable_pct=$(cat "$fable_cache" 2>/dev/null)
+fi
+
 # -- Rate limits --
 rl=""
 fmt_reset() {
@@ -331,19 +355,13 @@ if [ "$has_usage" -eq 1 ] && [ -n "$seven_d" ]; then
         [ -n "$seven_d_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$seven_d_reset")"
     fi
 fi
-
-# -- Cost --
-cost_part=""
-if [ "$has_usage" -eq 1 ] && [ -n "$cost_usd" ]; then
-    cost_int=${cost_usd%%.*}
-    if [ "${cost_int:-0}" -lt 1 ]; then
-        cost_fmt=$(printf '%.1f' "$cost_usd")
-    else
-        cost_fmt=$(printf '%.0f' "$cost_usd")
+if [ "$has_usage" -eq 1 ] && [ -n "$fable_pct" ]; then
+    fp=${fable_pct%.*}
+    if [ "$fp" -ge 0 ] 2>/dev/null && [ "$fp" -le 100 ]; then
+        rl="${rl} \033[37mFable${reset} $(bar $fp 6 quota) $(cpct $fp quota)"
     fi
-    cost_part=" ${yellow}\$${cost_fmt}${reset}"
 fi
 
 # -- Assemble --
 dir_link="\e]8;;file://${cwd}\a${b_cyan}📂 ${dir}${reset}\e]8;;\a"
-printf "%b" "${dir_link}${git_part} ${d_sep}│${reset} ${b_blue}${model}${reset}${effort_part}${ctx_part}${net_part}${rl}${cost_part}"
+printf "%b" "${dir_link}${git_part} ${d_sep}│${reset} ${b_blue}${model}${reset}${effort_part}${ctx_part}${net_part}${rl}"
