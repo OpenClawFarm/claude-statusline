@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code Statusline - designed for leecz
-# Version: 2.2.0 (removed cost display — total_cost_usd is inaccurate)
+# Version: 2.3.0 (7d quota shows used%/pace% — pace = elapsed share of the 7-day window)
 # Color scheme inspired by Starship / Lazygit / btop
 # Optimized: ~45 forks → ~12 forks per refresh
 
@@ -82,10 +82,11 @@ bar() {
 }
 
 cpct() {
-    local pct=${1:-0} type=${2:-ctx}
+    local pct=${1:-0} type=${2:-ctx} pace=${3:-}
     local c
     if [ "$type" = "quota" ]; then
-        if [ "$pct" -ge 90 ]; then c="${red}"
+        if [ -n "$pace" ] && [ "$pct" -gt "$pace" ] 2>/dev/null; then c="${red}"
+        elif [ "$pct" -ge 90 ]; then c="${red}"
         elif [ "$pct" -ge 75 ]; then c="${bright_mag}"
         else c="${bright_blue}"; fi
     else
@@ -324,6 +325,17 @@ fi
 
 # -- Rate limits --
 rl=""
+# 配额窗口按时间该走到的百分比 (匀速基准)。返回空 = 无法判定, 不显示对比
+pace_of() {
+    local reset=$1 win=$2 now remain
+    [ -z "$reset" ] && return
+    [ "$reset" -gt 0 ] 2>/dev/null || return
+    now=$(date +%s)
+    remain=$(( reset - now ))
+    [ "$remain" -lt 0 ] && remain=0
+    [ "$remain" -gt "$win" ] && return   # 窗口长度与假设不符, 宁可不显示
+    echo $(( (win - remain) * 100 / win ))
+}
 fmt_reset() {
     local epoch=$1
     [ -z "$epoch" ] && return
@@ -351,7 +363,9 @@ fi
 if [ "$has_usage" -eq 1 ] && [ -n "$seven_d" ]; then
     s=${seven_d%.*}
     if [ "$s" -ge 0 ] 2>/dev/null && [ "$s" -le 100 ]; then
-        rl="${rl} \033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota)"
+        pace7=$(pace_of "$seven_d_reset" 604800)
+        rl="${rl} \033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota "$pace7")"
+        [ -n "$pace7" ] && rl="${rl}${d_sep}/${reset}${d_label}${pace7}%${reset}"
         [ -n "$seven_d_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$seven_d_reset")"
     fi
 fi

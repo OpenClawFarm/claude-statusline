@@ -3,7 +3,7 @@
 A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — model, context, network, throughput, latency, and quotas in one status line.
 
 ```
-📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15% 5d  Fable ██░░░░ 28%
+📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ 5h ██░░░░ 32% 3h42m  7d █░░░░░ 15%/62% 5d  Fable ██░░░░ 28%
 ```
 
 ## Modules
@@ -18,7 +18,7 @@ A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 | 6 | Network | 🟢🟡🔴 | JSONL |
 | 7 | TPS | `55 tps` | JSONL |
 | 8 | RTT | `173ms` | ping |
-| 9 | Quotas | `5h ██░░░░ 32%` | CC JSON |
+| 9 | Quotas | `5h ██░░░░ 32%` · `7d █░░░░░ 15%/62%` | CC JSON |
 | 10 | Fable weekly | `Fable ██░░░░ 28%` | OAuth usage API |
 
 Directory, git branch, and effort level are clickable via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) (iTerm2, Kitty, WezTerm, Ghostty, Windows Terminal).
@@ -65,6 +65,8 @@ Claude Code pipes JSON to the script every ~1s. Modules 1–5 and 9 parse it wit
 
 **RTT (8)** — Pings `api.anthropic.com` every 5s (single ICMP packet, 2s timeout). Sliding window median over last 3 rounds. Falls back to `curl` TTFB if ICMP is blocked.
 
+**7-day pace (9)** — A weekly percentage alone can't tell you whether you're burning too fast. The second number after the slash is the *pace baseline*: how much of the 7-day window the clock has already consumed, derived from `resets_at` (`(604800 - secondsUntilReset) / 604800`). `15%/62%` means you're well under budget; `34%/33%` means you're ahead of schedule and the used percentage turns red. The bar stays keyed to the absolute percentage, so the bar answers "how much is left" while the number answers "am I too fast". Hidden when the remaining time doesn't fit a 7-day window (plan change, first window).
+
 **Fable weekly (10)** — Queries Anthropic's OAuth usage API for the Fable-scoped weekly limit, reusing the Claude Code OAuth token from the macOS keychain (or `~/.claude/.credentials.json`). Cached 60s and refreshed in a background subshell so the status line never blocks. Hidden if the account has no Fable weekly quota.
 
 ## Color Coding
@@ -73,6 +75,7 @@ Claude Code pipes JSON to the script every ~1s. Modules 1–5 and 9 parse it wit
 |--------|-------|--------|-----|
 | Context | <70% used | 70–84% | 85%+ |
 | Quota bars | <75% used | 75–89% | 90%+ |
+| 7d used % | at or under pace | — | ahead of pace, or 90%+ |
 | RTT | <300ms | 300–499ms | 500ms+ |
 | Network | 🟢 clear / 🟢*n* recovered | 🟡 1–4 retries | 🔴 5+ retries |
 
