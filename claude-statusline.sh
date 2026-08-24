@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code Statusline - designed for leecz
-# Version: 2.4.1 (7d quota shows used%/pace% — pace = share of the 7-day window elapsed, turns red when ahead; segments separated by │, ⏱️5h ☀️7d)
+# Version: 2.3.0 (7d quota shows used%/pace% — pace = elapsed share of the 7-day window)
 # Color scheme inspired by Starship / Lazygit / btop
 # Optimized: ~45 forks → ~12 forks per refresh
 
@@ -356,7 +356,7 @@ fmt_reset() {
 if [ "$has_usage" -eq 1 ] && [ -n "$five_h" ]; then
     f=${five_h%.*}
     if [ "$f" -ge 0 ] 2>/dev/null && [ "$f" -le 100 ]; then
-        rl=" ${d_sep}│${reset} ⏱️\033[37m5h${reset} $(bar $f 6 quota) $(cpct $f quota)"
+        rl=" ${d_sep}│${reset} \033[37m5h${reset} $(bar $f 6 quota) $(cpct $f quota)"
         [ -n "$five_h_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$five_h_reset")"
     fi
 fi
@@ -364,7 +364,7 @@ if [ "$has_usage" -eq 1 ] && [ -n "$seven_d" ]; then
     s=${seven_d%.*}
     if [ "$s" -ge 0 ] 2>/dev/null && [ "$s" -le 100 ]; then
         pace7=$(pace_of "$seven_d_reset" 604800)
-        rl="${rl} ${d_sep}│${reset} ☀️\033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota "$pace7")"
+        rl="${rl} \033[37m7d${reset} $(bar $s 6 quota) $(cpct $s quota "$pace7")"
         [ -n "$pace7" ] && rl="${rl}${d_sep}/${reset}${d_label}${pace7}%${reset}"
         [ -n "$seven_d_reset" ] && rl="${rl}$(printf ' '; fmt_reset "$seven_d_reset")"
     fi
@@ -372,7 +372,7 @@ fi
 if [ "$has_usage" -eq 1 ] && [ -n "$fable_pct" ]; then
     fp=${fable_pct%.*}
     if [ "$fp" -ge 0 ] 2>/dev/null && [ "$fp" -le 100 ]; then
-        rl="${rl} ${d_sep}│${reset} \033[37mFable${reset} $(bar $fp 6 quota) $(cpct $fp quota)"
+        rl="${rl} \033[37mFable${reset} $(bar $fp 6 quota) $(cpct $fp quota)"
     fi
 fi
 
