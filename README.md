@@ -3,7 +3,7 @@
 A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — model, context, network, throughput, latency, and quotas in one status line.
 
 ```
-📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ ⏱5h ██░░░░ 32% 3h42m  ☀7d █░░░░░ 15%/62% 5d  Fable ██░░░░ 28%
+📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ ⏱ 5h ██░░░░ 32% 3h42m  ☀ 7d █░░░░░ 15%/62% 5d  Fable ██░░░░ 28%
 ```
 
 ## Modules
@@ -18,7 +18,7 @@ A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 | 6 | Network | 🟢🟡🔴 | JSONL |
 | 7 | TPS | `55 tps` | JSONL |
 | 8 | RTT | `173ms` | ping |
-| 9 | Quotas | `⏱5h ██░░░░ 32%` · `☀7d █░░░░░ 15%/62%` | CC JSON |
+| 9 | Quotas | `⏱ 5h ██░░░░ 32%` · `☀ 7d █░░░░░ 15%/62%` | CC JSON |
 | 10 | Fable weekly | `Fable ██░░░░ 28%` | OAuth usage API |
 
 Directory, git branch, and effort level are clickable via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) (iTerm2, Kitty, WezTerm, Ghostty, Windows Terminal).
