@@ -3,7 +3,7 @@
 A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — model, context, network, throughput, latency, and quotas in one status line.
 
 ```
-📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ ⏱ 5h ██░░░░ 32% 3h42m  ☀ 7d █░░░░░ 15%/62% 5d  Fable ██░░░░ 28%
+📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ ⏱ 5h ██░░░░ 32% 3h42m  ☀ 7d █░░░░░ 15%/62% 5d  ✦ Fable ██░░░░ 28%
 ```
 
 ## Modules

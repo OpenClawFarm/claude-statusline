@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code Statusline - designed for leecz
-# Version: 2.3.1 (⏱ 5h / ☀ 7d prefixes; 7d quota shows used%/pace% — pace = share of the 7-day window elapsed, turns red when ahead)
+# Version: 2.3.2 (⏱ 5h / ☀ 7d / ✦ Fable prefixes; 7d quota shows used%/pace% — pace = share of the 7-day window elapsed, turns red when ahead)
 # Color scheme inspired by Starship / Lazygit / btop
 # Optimized: ~45 forks → ~12 forks per refresh
 
@@ -372,7 +372,7 @@ fi
 if [ "$has_usage" -eq 1 ] && [ -n "$fable_pct" ]; then
     fp=${fable_pct%.*}
     if [ "$fp" -ge 0 ] 2>/dev/null && [ "$fp" -le 100 ]; then
-        rl="${rl} \033[37mFable${reset} $(bar $fp 6 quota) $(cpct $fp quota)"
+        rl="${rl} ✦ \033[37mFable${reset} $(bar $fp 6 quota) $(cpct $fp quota)"
     fi
 fi
 
