@@ -6,6 +6,8 @@ A real-time HUD for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 📂 ~/project  main~+ │ Opus 4.6 ◕high 280k 🟢 55 tps 173ms │ ⏱ 5h ██░░░░ 32% 3h42m  ☀ 7d █░░░░░ 15%/62% 5d  ✦ Fable ██░░░░ 28%
 ```
 
+A single native binary (Rust). Claude Code runs the status line about once a second; a render takes ~4 ms plus git (~20 ms inside a repo on macOS), versus ~230 ms for the 2.x bash script it replaces.
+
 ## Modules
 
 | # | Module | Display | Source |
@@ -26,8 +28,7 @@ Directory, git branch, and effort level are clickable via [OSC 8](https://gist.g
 ## Install
 
 ```bash
-curl -o ~/.claude/statusline-command.sh \
-  https://raw.githubusercontent.com/OpenClawFarm/claude-statusline/main/claude-statusline.sh
+cargo install --git https://github.com/OpenClawFarm/claude-statusline
 ```
 
 Add to `~/.claude/settings.json`:
@@ -36,38 +37,32 @@ Add to `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
+    "command": "~/.cargo/bin/claude-statusline"
   }
 }
 ```
 
-Restart Claude Code. Requires **jq** and **Python 3.9+**.
+Restart Claude Code. Runtime tools: **git** (branch), **ping** and **curl** (RTT, Fable quota). No jq or Python needed.
 
-<details>
-<summary>Windows (Git Bash)</summary>
-
-```powershell
-winget install jqlang.jq
-winget install Python.Python.3.13
-```
-
-The script auto-detects Windows and adjusts `stat`, `ping`, cache paths, and Python/jq lookup. No manual patching needed.
-
-</details>
+The 2.x bash script is kept at tag [`v2.3.2`](https://github.com/OpenClawFarm/claude-statusline/tree/v2.3.2).
 
 ## How It Works
 
-Claude Code pipes JSON to the script every ~1s. Modules 1–5 and 9 parse it with `jq`. The remaining modules work differently:
+Claude Code pipes JSON to the binary every ~1s. Modules 1, 3–5 and 9 come straight from it. The rest:
 
-**Network (6)** — Reads the JSONL session transcript using positional comparison: if the last `retryInMs` appears after the last `stop_reason`, the session is retrying. After recovery, recent retry count is retained (e.g. `🟢3`) so transient issues are visible. Error tags (`rst`, `cert`, `504`) indicate what to fix. Auto-discovers active sessions across all project directories. Inspired by [claudebubble](https://github.com/limin112/claudebubble).
+**Git (2)** — Branch plus `~` (working tree differs from HEAD) and `+` (staged changes), from a single `git status --porcelain=v2 --branch -uno`, run with `--no-optional-locks` so it never contends with your own git commands. Outside a work tree git isn't invoked at all. The branch links to the GitHub tree when `origin` is set.
 
-**TPS (7)** — Calculates `output_tokens / streaming_time` from JSONL, excluding tool execution time. Multi-block responses (thinking/text/tool_use) are grouped by `message.id` and timed from before the first block. Token-weighted average over the 5 most recent responses across all active sessions (`sum(tokens) / sum(seconds)`), so long responses dominate and TTFT noise averages out. Per-sample sanity filters: >0.3s, 10–800 tps. Recomputed at most every 3s.
+**Network (6)** — Reads the JSONL session transcripts using positional comparison: if the last `retryInMs` appears after the last `stop_reason`, the session is retrying. After recovery, the recent retry count is retained (e.g. `🟢3`) so transient issues stay visible. Error tags (`rst`, `cert`, `504`) indicate what to fix. Active sessions (written in the last 5 minutes, subagents included, newest 10) are discovered across all project directories. Inspired by [claudebubble](https://github.com/limin112/claudebubble).
 
-**RTT (8)** — Pings `api.anthropic.com` every 5s (single ICMP packet, 2s timeout). Sliding window median over last 3 rounds. Falls back to `curl` TTFB if ICMP is blocked.
+**TPS (7)** — `output_tokens / streaming_time` from the transcripts, excluding tool execution time. Multi-block responses (thinking/text/tool_use) are grouped by `message.id` and timed from before the first block. Token-weighted average over the 5 most recent responses across all active sessions (`sum(tokens) / sum(seconds)`), so long responses dominate and TTFT noise averages out. Per-sample sanity filters: >0.3s, 10–800 tps. Recomputed at most every 3s, and only when a transcript changed. Transcripts are read backwards from the end, so large sessions cost only their last few hundred lines.
+
+**RTT (8)** — Pings `api.anthropic.com` (single ICMP packet), falling back to `curl` time-to-first-byte if ICMP gets no reply. Median of the last 3 samples. The probe runs in a detached background copy of the binary at most every 5s, so the status line never waits on the network. Behind a local TUN proxy (fake-IP DNS), ICMP is answered locally and the reading is meaningless.
 
 **7-day pace (9)** — A weekly percentage alone can't tell you whether you're burning too fast. The second number after the slash is the *pace baseline*: how much of the 7-day window the clock has already consumed, derived from `resets_at` (`(604800 - secondsUntilReset) / 604800`). `15%/62%` means you're well under budget; `34%/33%` means you're ahead of schedule and the used percentage turns red. The bar stays keyed to the absolute percentage, so the bar answers "how much is left" while the number answers "am I too fast". Hidden when the remaining time doesn't fit a 7-day window (plan change, first window).
 
-**Fable weekly (10)** — Queries Anthropic's OAuth usage API for the Fable-scoped weekly limit, reusing the Claude Code OAuth token from the macOS keychain (or `~/.claude/.credentials.json`). Cached 60s and refreshed in a background subshell so the status line never blocks. Hidden if the account has no Fable weekly quota.
+**Fable weekly (10)** — Queries Anthropic's OAuth usage API for the Fable-scoped weekly limit, reusing the Claude Code OAuth token from the macOS keychain (or `~/.claude/.credentials.json`). The token is passed to curl on stdin, never on the command line. Refreshed in the background at most every 60s. Hidden if the account has no Fable weekly quota.
+
+Caches live in `~/.claude/.sl-*` (session list, TPS, RTT samples, Fable percentage).
 
 ## Color Coding
 
@@ -89,7 +84,16 @@ Claude Code pipes JSON to the script every ~1s. Modules 1–5 and 9 parse it wit
 | macOS Terminal.app | Yes | No |
 | tmux | Yes | Needs `allow-passthrough` |
 
-Works on macOS, Linux, and Windows (Git Bash).
+Verified on macOS (Apple Silicon). Linux should work as-is; Windows builds but is untested since the move from bash.
+
+## Development
+
+```bash
+cargo test
+cargo build --release    # target/release/claude-statusline
+echo '{"model":{"display_name":"Opus"},"context_window":{"remaining_percentage":60}}' \
+  | target/release/claude-statusline
+```
 
 ## License
 

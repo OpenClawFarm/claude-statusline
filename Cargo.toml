@@ -1,0 +1,18 @@
+[package]
+name = "claude-statusline"
+version = "3.0.0"
+edition = "2024"
+description = "A real-time HUD for Claude Code: model, context, network, throughput, latency, and quotas in one status line"
+license = "MIT"
+repository = "https://github.com/OpenClawFarm/claude-statusline"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
