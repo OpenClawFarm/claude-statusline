@@ -19,7 +19,7 @@ A single native binary (Rust). Claude Code runs the status line about once a sec
 | 5 | Context | `280k` | CC JSON |
 | 6 | Network | 🟢🟡🔴 | JSONL |
 | 7 | TPS | `55 tps` | JSONL |
-| 8 | RTT | `173ms` | ping |
+| 8 | API RTT | `113ms` | HTTPS probe |
 | 9 | Quotas | `⏱ 5h ██░░░░ 32%` · `☀ 7d █░░░░░ 15%/62%` | CC JSON |
 | 10 | Fable weekly | `Fable ██░░░░ 28%` | OAuth usage API |
 
@@ -27,22 +27,34 @@ Directory, git branch, and effort level are clickable via [OSC 8](https://gist.g
 
 ## Install
 
+**macOS (Apple Silicon)** — prebuilt binary:
+
 ```bash
-cargo install --git https://github.com/OpenClawFarm/claude-statusline
+mkdir -p ~/.claude/bin
+curl -fsSL https://github.com/OpenClawFarm/claude-statusline/releases/latest/download/claude-statusline-aarch64-apple-darwin.tar.gz \
+  | tar -xz -C ~/.claude/bin
 ```
 
-Add to `~/.claude/settings.json`:
+Downloading with `curl` leaves no quarantine flag, so it runs as-is. If you fetched the archive with a browser instead, clear it: `xattr -d com.apple.quarantine ~/.claude/bin/claude-statusline`. A `.sha256` file sits next to each release archive.
+
+**Other platforms** — build from source:
+
+```bash
+cargo install --git https://github.com/OpenClawFarm/claude-statusline   # → ~/.cargo/bin/claude-statusline
+```
+
+Add to `~/.claude/settings.json` (adjust the path for `cargo install`):
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.cargo/bin/claude-statusline"
+    "command": "~/.claude/bin/claude-statusline"
   }
 }
 ```
 
-Restart Claude Code. Runtime tools: **git** (branch), **ping** and **curl** (RTT, Fable quota). No jq or Python needed.
+Restart Claude Code. Runtime tools: **git** (branch) and **curl** (API RTT, Fable quota). No jq or Python needed.
 
 The 2.x bash script is kept at tag [`v2.3.2`](https://github.com/OpenClawFarm/claude-statusline/tree/v2.3.2).
 
@@ -56,7 +68,7 @@ Claude Code pipes JSON to the binary every ~1s. Modules 1, 3–5 and 9 come stra
 
 **TPS (7)** — `output_tokens / streaming_time` from the transcripts, excluding tool execution time. Multi-block responses (thinking/text/tool_use) are grouped by `message.id` and timed from before the first block. Token-weighted average over the 5 most recent responses across all active sessions (`sum(tokens) / sum(seconds)`), so long responses dominate and TTFT noise averages out. Per-sample sanity filters: >0.3s, 10–800 tps. Recomputed at most every 3s, and only when a transcript changed. Transcripts are read backwards from the end, so large sessions cost only their last few hundred lines.
 
-**RTT (8)** — Pings `api.anthropic.com` (single ICMP packet), falling back to `curl` time-to-first-byte if ICMP gets no reply. Median of the last 3 samples. The probe runs in a detached background copy of the binary at most every 5s, so the status line never waits on the network. Behind a local TUN proxy (fake-IP DNS), ICMP is answered locally and the reading is meaningless.
+**API RTT (8)** — Round trip to `api.anthropic.com` over the same network path Claude Code uses (a TUN proxy or `HTTPS_PROXY` is honored, since the probe is `curl`): the time from TLS established to the first response byte, i.e. one request/response over a warm connection. Handshake time is excluded, and so is a local TUN proxy answering ICMP/TCP on the API's behalf — the reason plain `ping` read ~0 ms on proxied machines. One unauthenticated request every 30s in a detached background copy of the binary; the status line shows the median of the last 3 samples and never waits on the network.
 
 **7-day pace (9)** — A weekly percentage alone can't tell you whether you're burning too fast. The second number after the slash is the *pace baseline*: how much of the 7-day window the clock has already consumed, derived from `resets_at` (`(604800 - secondsUntilReset) / 604800`). `15%/62%` means you're well under budget; `34%/33%` means you're ahead of schedule and the used percentage turns red. The bar stays keyed to the absolute percentage, so the bar answers "how much is left" while the number answers "am I too fast". Hidden when the remaining time doesn't fit a 7-day window (plan change, first window).
 

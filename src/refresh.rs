@@ -38,75 +38,37 @@ fn stdout_of(cmd: &mut Command) -> String {
         .unwrap_or_default()
 }
 
-/// awk's numeric conversion (`printf "%d"`): longest leading decimal prefix, truncated.
-fn awk_int(s: &str, scale: f64) -> String {
-    let s = s.trim_start();
-    let mut end = 0;
-    let mut dot = false;
-    for (i, c) in s.char_indices() {
-        match c {
-            '0'..='9' => end = i + 1,
-            '.' if !dot => {
-                dot = true;
-                end = i + 1;
-            }
-            _ => break,
-        }
-    }
-    let v: f64 = s[..end].parse().unwrap_or(0.0);
-    ((v * scale) as i64).to_string()
-}
-
-/// One ICMP round trip in whole ms. Empty when no reply line; `"0"` for sub-millisecond
-/// replies (which are then discarded, not retried over HTTPS).
-#[cfg(not(windows))]
-fn ping() -> String {
-    let out = stdout_of(Command::new("ping").args(["-c", "1", "-W", "2", HOST]));
-    out.match_indices("time=")
-        .map(|(i, m)| {
-            let rest = &out[i + m.len()..];
-            let n = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
-            awk_int(&rest[..n], 1.0)
-        })
-        .collect()
-}
-
-#[cfg(windows)]
-fn ping() -> String {
-    let out = stdout_of(Command::new("ping").args(["-n", "1", "-w", "2000", HOST]));
-    out.match_indices("time")
-        .filter_map(|(i, m)| {
-            let rest = out[i + m.len()..].strip_prefix(['<', '='])?;
-            let n = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-            (n > 0).then(|| rest[..n].to_string())
-        })
-        .next()
-        .unwrap_or_default()
-}
-
-/// HTTPS time-to-first-byte in ms, the fallback when ICMP gets no reply.
-fn curl_ttfb() -> String {
+/// Round trip to the API over the same path Claude Code uses (TUN proxy or `HTTPS_PROXY`), in
+/// ms: from TLS established to the first response byte. Connection setup is excluded, and so is
+/// a local TUN answering ICMP/TCP on the API's behalf, which made plain `ping` read ~0 ms.
+fn api_rtt_ms() -> Option<i64> {
     let url = format!("https://{HOST}/v1/messages");
-    let out = stdout_of(Command::new("curl").args([
-        "-o", DEV_NULL, "-s", "-w", "%{time_starttransfer}", "--max-time", "2", &url,
-    ]));
-    out.lines()
-        .map(|l| awk_int(l.split_whitespace().next().unwrap_or(""), 1000.0))
-        .collect()
+    parse_rtt(&stdout_of(Command::new("curl").args([
+        "-o",
+        DEV_NULL,
+        "-s",
+        "-w",
+        "%{time_appconnect} %{time_starttransfer}",
+        "--max-time",
+        "5",
+        &url,
+    ])))
+}
+
+/// `"<tls done> <first byte>"` in seconds → ms; None when the request failed.
+fn parse_rtt(out: &str) -> Option<i64> {
+    let mut times = out.split_whitespace().map(|v| v.parse::<f64>().ok());
+    let (tls, first) = (times.next()??, times.next()??);
+    let ms = ((first - tls) * 1000.0).round() as i64;
+    (tls > 0.0 && ms > 0).then_some(ms)
 }
 
 /// Append one RTT sample to `cache`, keeping the last 3 (the display takes their median).
 pub fn rtt(cache: &Path) {
-    let mut fresh = ping();
-    if fresh.is_empty() {
-        fresh = curl_ttfb();
-    }
-    if !fresh.parse::<i64>().is_ok_and(|v| v > 0) {
-        return;
-    }
+    let Some(ms) = api_rtt_ms() else { return };
     let old = fs::read_to_string(cache).unwrap_or_default();
-    let mut samples: Vec<&str> = old.lines().collect();
-    samples.push(&fresh);
+    let mut samples: Vec<String> = old.lines().map(str::to_string).collect();
+    samples.push(ms.to_string());
     let keep = &samples[samples.len().saturating_sub(3)..];
     write_atomic(cache, &format!("{}\n", keep.join("\n")));
 }
@@ -191,11 +153,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn awk_conversion() {
-        assert_eq!(awk_int("221.345", 1.0), "221");
-        assert_eq!(awk_int("0.211", 1.0), "0");
-        assert_eq!(awk_int("", 1.0), "0");
-        assert_eq!(awk_int("0.454168", 1000.0), "454");
+    fn rtt_from_curl_timings() {
+        assert_eq!(parse_rtt("0.123000 0.248400"), Some(125));
+        assert_eq!(parse_rtt("0.000000 0.000000"), None); // connection failed
+        assert_eq!(parse_rtt("0.123000 0.000000"), None); // timed out waiting for a response
+        assert_eq!(parse_rtt(""), None);
     }
 
     #[test]

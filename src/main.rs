@@ -33,6 +33,7 @@ const D_SEP: &str = "\x1b[2;90m";
 const D_LABEL: &str = "\x1b[2;37m";
 
 const SEVEN_DAYS: i64 = 604_800;
+const RTT_INTERVAL: i64 = 30;
 
 fn main() {
     let home = env::var("HOME")
@@ -234,37 +235,24 @@ fn network_part(home: &str, cache_dir: &Path, now: i64) -> String {
     net
 }
 
-/// `sort -n` key: leading decimal number, 0 when there is none.
-fn sort_n_key(s: &str) -> f64 {
-    let s = s.trim_start();
-    let end = s
-        .char_indices()
-        .find(|&(i, c)| !(c.is_ascii_digit() || c == '.' || (i == 0 && c == '-')))
-        .map_or(s.len(), |(i, _)| i);
-    s[..end].parse().unwrap_or(0.0)
-}
-
-/// Median of the last 3 RTT samples; a background probe refreshes them every 5s.
+/// Median of the last 3 API round-trip samples; a background probe adds one every 30s.
 fn rtt_part(cache_dir: &Path, now: i64) -> String {
     let cache = cache_dir.join(".sl-rtt");
-    if now - mtime(&cache) > 5 {
+    if now - mtime(&cache) > RTT_INTERVAL {
         touch(&cache);
         refresh::spawn(refresh::RTT);
     }
-    let text = fs::read_to_string(&cache).unwrap_or_default();
-    let mut samples: Vec<&str> = text.lines().collect();
+    let mut samples: Vec<i64> = fs::read_to_string(&cache)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .filter(|v| *v > 0)
+        .collect();
     if samples.is_empty() {
         return String::new();
     }
-    samples.sort_by(|a, b| sort_n_key(a).total_cmp(&sort_n_key(b)).then_with(|| a.cmp(b)));
-    let Some(ms) = samples[samples.len() / 2]
-        .trim()
-        .parse::<i64>()
-        .ok()
-        .filter(|v| *v > 0)
-    else {
-        return String::new();
-    };
+    samples.sort_unstable();
+    let ms = samples[samples.len() / 2];
     let c = if ms >= 500 {
         RED
     } else if ms >= 300 {
