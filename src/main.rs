@@ -147,7 +147,7 @@ fn render(input: &str, home: &str, cache_dir: &Path) -> String {
     let dir = display_dir(&cwd, home);
     format!(
         "\x1b]8;;file://{cwd}\x07{B_CYAN}📂 {dir}{RESET}\x1b]8;;\x07{git_part} {D_SEP}│{RESET} {B_BLUE}{model}{RESET}{}{ctx_part}{net_part}{rl}",
-        effort_part(home)
+        effort_part(&field(&v, &["/effort/level"]), home)
     )
 }
 
@@ -181,16 +181,23 @@ fn short_model(name: &str) -> String {
     }
 }
 
-fn effort_part(home: &str) -> String {
-    let level = fs::read_to_string(Path::new(home).join(".claude/settings.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .map(|v| field(&v, &["/effortLevel"]))
-        .unwrap_or_default();
+/// Session effort as Claude Code resolved it (`/effort`, per-model `modelSettings`); older
+/// versions don't send `effort.level`, so fall back to the top-level settings.json value.
+fn effort_part(level: &str, home: &str) -> String {
+    let level = if level.is_empty() {
+        fs::read_to_string(Path::new(home).join(".claude/settings.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .map(|v| field(&v, &["/effortLevel"]))
+            .unwrap_or_default()
+    } else {
+        level.to_string()
+    };
     let icon = match level.as_str() {
-        "low" | "min" => "◔",
+        "low" => "◔",
         "medium" | "" => "◑",
-        "high" | "max" => "◕",
+        "high" => "◕",
+        "xhigh" | "max" => "●",
         _ => return String::new(),
     };
     format!(
@@ -374,6 +381,16 @@ mod tests {
         assert_eq!(pace_of("", SEVEN_DAYS, now), None);
         assert!(cpct(34, Some(33)).contains(RED));
         assert!(!cpct(33, Some(33)).contains(RED));
+    }
+
+    #[test]
+    fn effort_levels() {
+        let shown = |level: &str| effort_part(level, "/nonexistent");
+        assert!(shown("xhigh").contains("●xhigh"));
+        assert!(shown("max").contains("●max"));
+        assert!(shown("high").contains("◕high"));
+        assert!(shown("low").contains("◔low"));
+        assert_eq!(shown("bogus"), "");
     }
 
     #[test]

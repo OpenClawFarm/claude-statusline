@@ -1,6 +1,6 @@
 [package]
 name = "claude-statusline"
-version = "3.0.0"
+version = "3.0.1"
 edition = "2024"
 description = "A real-time HUD for Claude Code: model, context, network, throughput, latency, and quotas in one status line"
 license = "MIT"

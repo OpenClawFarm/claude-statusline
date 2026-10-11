@@ -15,7 +15,7 @@ A single native binary (Rust). Claude Code runs the status line about once a sec
 | 1 | Directory | `📂 ~/path` | CC JSON |
 | 2 | Git branch | ` main~+` | git |
 | 3 | Model | `Opus 4.6` | CC JSON |
-| 4 | Effort | `◔` `◑` `◕` | settings.json |
+| 4 | Effort | `◔` `◑` `◕` `●` | CC JSON (fallback: settings.json) |
 | 5 | Context | `280k` | CC JSON |
 | 6 | Network | 🟢🟡🔴 | JSONL |
 | 7 | TPS | `55 tps` | JSONL |
