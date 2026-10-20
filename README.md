@@ -72,9 +72,9 @@ Claude Code pipes JSON to the binary every ~1s. Modules 1, 3–5 and 9 come stra
 
 **7-day pace (9)** — A weekly percentage alone can't tell you whether you're burning too fast. The second number after the slash is the *pace baseline*: how much of the 7-day window the clock has already consumed, derived from `resets_at` (`(604800 - secondsUntilReset) / 604800`). `15%/62%` means you're well under budget; `34%/33%` means you're ahead of schedule and the used percentage turns red. The bar stays keyed to the absolute percentage, so the bar answers "how much is left" while the number answers "am I too fast". Hidden when the remaining time doesn't fit a 7-day window (plan change, first window).
 
-**Fable weekly (10)** — Queries Anthropic's OAuth usage API for the Fable-scoped weekly limit, reusing the Claude Code OAuth token from the macOS keychain (or `~/.claude/.credentials.json`). The token is passed to curl on stdin, never on the command line. Refreshed in the background at most every 60s. Hidden if the account has no Fable weekly quota.
+**Fable weekly (10)** — Queries Anthropic's OAuth usage API for the Fable-scoped weekly limit, reusing the Claude Code OAuth token from the macOS keychain (or `~/.claude/.credentials.json`). The token is passed to curl on stdin, never on the command line. Refreshed in the background at most every 60s. Hidden if the account has no Fable weekly quota. The full response is also kept in `~/.claude/.sl-usage.json` (rewritten only when it carries limits, so a rate-limited query keeps the last good one) for other local tools that want the account's quota without querying the API themselves; its mtime is the time of the last successful query.
 
-Caches live in `~/.claude/.sl-*` (session list, TPS, RTT samples, Fable percentage).
+Caches live in `~/.claude/.sl-*` (session list, TPS, RTT samples, Fable percentage, last usage response).
 
 ## Color Coding
 

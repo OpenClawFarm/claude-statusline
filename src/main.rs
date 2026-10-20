@@ -48,7 +48,9 @@ fn main() {
             return;
         }
         Some(refresh::RTT) => return refresh::rtt(&cache_dir.join(".sl-rtt")),
-        Some(refresh::FABLE) => return refresh::fable(&home, &cache_dir.join(".sl-fable")),
+        Some(refresh::FABLE) => {
+            return refresh::fable(&home, &cache_dir.join(".sl-fable"), &cache_dir.join(".sl-usage.json"));
+        }
         _ => {}
     }
     let _ = fs::create_dir_all(&cache_dir);

@@ -115,8 +115,20 @@ fn fable_percent(usage: &Value) -> Option<String> {
     }
 }
 
-/// Query the OAuth usage API and store the Fable weekly percentage in `cache`.
-pub fn fable(home: &str, cache: &Path) {
+/// Whether a usage API response carries quota limits (an error body such as a rate limit
+/// does not).
+fn has_limits(usage: &Value) -> bool {
+    match usage.get("limits") {
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(Value::Object(o)) => !o.is_empty(),
+        _ => false,
+    }
+}
+
+/// Query the OAuth usage API: store the Fable weekly percentage in `cache`, and the whole
+/// response in `usage_cache` so other local tools can read the account's quota without
+/// querying the API themselves. A response without limits leaves both files untouched.
+pub fn fable(home: &str, cache: &Path, usage_cache: &Path) {
     let Some(tok) = token(home) else { return };
     // The token goes in on stdin (`-H @-`) so it never shows up in the process list.
     let child = Command::new("curl")
@@ -139,10 +151,12 @@ pub fn fable(home: &str, cache: &Path) {
         let _ = writeln!(stdin, "Authorization: Bearer {tok}");
     }
     let Ok(out) = child.wait_with_output() else { return };
-    let pct = serde_json::from_slice::<Value>(&out.stdout)
-        .ok()
-        .and_then(|v| fable_percent(&v));
-    if let Some(pct) = pct {
+    let Ok(usage) = serde_json::from_slice::<Value>(&out.stdout) else { return };
+    if !has_limits(&usage) {
+        return;
+    }
+    write_atomic(usage_cache, &String::from_utf8_lossy(&out.stdout));
+    if let Some(pct) = fable_percent(&usage) {
         write_atomic(cache, &format!("{pct}\n"));
     }
 }
@@ -170,5 +184,12 @@ mod tests {
         assert_eq!(fable_percent(&usage).as_deref(), Some("28.5"));
         assert_eq!(fable_percent(&json!({"limits": []})), None);
         assert_eq!(fable_percent(&json!({})), None);
+    }
+
+    #[test]
+    fn usage_worth_caching() {
+        assert!(has_limits(&json!({"limits": [{"kind": "session", "percent": 3}]})));
+        assert!(!has_limits(&json!({"limits": []})));
+        assert!(!has_limits(&json!({"error": {"type": "rate_limit_error"}})));
     }
 }
