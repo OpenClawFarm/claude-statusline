@@ -113,7 +113,7 @@ fn render(input: &str, home: &str, cache_dir: &Path) -> String {
     let mut rl = String::new();
     if let (true, Some(rem)) = (has_usage, ctx_rem) {
         let pct = (100 - rem).clamp(0, 100);
-        let total = if model.contains("Opus") || model.contains("opus") { 1000 } else { 200 };
+        let total = window_k(&v);
         let c = if pct >= 85 {
             RED
         } else if pct >= 70 {
@@ -181,6 +181,15 @@ fn short_model(name: &str) -> String {
         }
         _ => name,
     }
+}
+
+/// The current model's context window in thousands of tokens, as Claude Code reports it
+/// (200k if it doesn't).
+fn window_k(v: &Value) -> i64 {
+    v.pointer("/context_window/context_window_size")
+        .and_then(Value::as_f64)
+        .filter(|size| *size >= 1000.0)
+        .map_or(200, |size| (size / 1000.0).round() as i64)
 }
 
 /// Session effort as Claude Code resolved it (`/effort`, per-model `modelSettings`); older
@@ -350,6 +359,15 @@ mod tests {
         assert_eq!(short_model(""), "?");
         assert_eq!(short_model("Sonnet (a) x (b)"), "Sonnet");
         assert_eq!(short_model("odd) name ("), "odd) name (");
+    }
+
+    #[test]
+    fn context_window_size() {
+        let k = |json: &str| window_k(&serde_json::from_str(json).unwrap());
+        assert_eq!(k(r#"{"context_window":{"context_window_size":1000000}}"#), 1000);
+        assert_eq!(k(r#"{"context_window":{"context_window_size":200000}}"#), 200);
+        assert_eq!(k(r#"{"context_window":{"context_window_size":null}}"#), 200);
+        assert_eq!(k(r#"{"model":{"display_name":"Opus"}}"#), 200);
     }
 
     #[test]

@@ -103,7 +103,7 @@ Verified on macOS (Apple Silicon). Linux should work as-is; Windows builds but i
 ```bash
 cargo test
 cargo build --release    # target/release/claude-statusline
-echo '{"model":{"display_name":"Opus"},"context_window":{"remaining_percentage":60}}' \
+echo '{"model":{"display_name":"Opus"},"context_window":{"context_window_size":1000000,"remaining_percentage":60}}' \
   | target/release/claude-statusline
 ```
 
