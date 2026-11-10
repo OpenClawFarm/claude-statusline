@@ -95,14 +95,27 @@ fn token(home: &str) -> Option<String> {
     })
 }
 
-/// `percent` of the first weekly-scoped limit whose model name mentions Fable.
-fn fable_percent(usage: &Value) -> Option<String> {
-    let limits: Vec<&Value> = match usage.get("limits") {
+fn limits(usage: &Value) -> Vec<&Value> {
+    match usage.get("limits") {
         Some(Value::Array(a)) => a.iter().collect(),
         Some(Value::Object(o)) => o.values().collect(),
         _ => Vec::new(),
-    };
-    let limit = limits.into_iter().find(|l| {
+    }
+}
+
+/// When the account-wide weekly window of a usage response resets (ISO 8601).
+pub fn weekly_reset(usage: &Value) -> Option<&str> {
+    limits(usage)
+        .into_iter()
+        .find(|l| l.get("kind").and_then(Value::as_str) == Some("weekly_all"))
+        .and_then(|l| l.get("resets_at"))
+        .or_else(|| usage.pointer("/seven_day/resets_at"))
+        .and_then(Value::as_str)
+}
+
+/// `percent` of the first weekly-scoped limit whose model name mentions Fable.
+fn fable_percent(usage: &Value) -> Option<String> {
+    let limit = limits(usage).into_iter().find(|l| {
         l.get("kind").and_then(Value::as_str) == Some("weekly_scoped")
             && l.pointer("/scope/model/display_name")
                 .and_then(Value::as_str)
@@ -184,6 +197,19 @@ mod tests {
         assert_eq!(fable_percent(&usage).as_deref(), Some("28.5"));
         assert_eq!(fable_percent(&json!({"limits": []})), None);
         assert_eq!(fable_percent(&json!({})), None);
+    }
+
+    #[test]
+    fn weekly_window_reset() {
+        let usage = json!({"limits": [
+            {"kind": "session", "resets_at": "2026-11-10T03:00:00+00:00"},
+            {"kind": "weekly_all", "resets_at": "2026-11-14T11:59:59.873712+00:00"},
+        ], "seven_day": {"resets_at": "2026-11-14T12:00:00+00:00"}});
+        assert_eq!(weekly_reset(&usage), Some("2026-11-14T11:59:59.873712+00:00"));
+        let legacy = json!({"seven_day": {"resets_at": "2026-11-14T12:00:00+00:00"}});
+        assert_eq!(weekly_reset(&legacy), Some("2026-11-14T12:00:00+00:00"));
+        assert_eq!(weekly_reset(&json!({"limits": [{"kind": "weekly_all", "resets_at": null}]})), None);
+        assert_eq!(weekly_reset(&Value::Null), None);
     }
 
     #[test]

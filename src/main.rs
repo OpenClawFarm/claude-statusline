@@ -13,7 +13,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
-use util::{int_part, mtime, now, read_trim, touch, write_atomic};
+use util::{int_part, iso_micros, mtime, now, read_trim, touch, write_atomic};
 
 // Colors (3-tier hierarchy: bold bright → normal → dim)
 const BOLD: &str = "\x1b[1m";
@@ -141,7 +141,15 @@ fn render(input: &str, home: &str, cache_dir: &Path) -> String {
                 rl += &format!(" {}", fmt_reset(&seven_d_reset, now));
             }
         }
-        if let Some(fp) = int_part(&fable_pct(cache_dir, now)).filter(|p| (0..=100).contains(p)) {
+        // The query runs either way, to keep the usage cache fresh for the login's account.
+        let fable = fable_pct(cache_dir, now);
+        let usage = fs::read_to_string(cache_dir.join(".sl-usage.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(Value::Null);
+        if same_account(&seven_d_reset, &usage)
+            && let Some(fp) = int_part(&fable).filter(|p| (0..=100).contains(p))
+        {
             rl += &format!(" ✦ {WHITE}Fable{RESET} {} {}", bar(fp, 6), cpct(fp, None));
         }
     }
@@ -291,6 +299,20 @@ fn fable_pct(cache_dir: &Path, now: i64) -> String {
     read_trim(&cache)
 }
 
+/// Whether the cached usage response, fetched with the stored login, is for the account this
+/// session runs on. A session started with another account's token (`CLAUDE_CODE_OAUTH_TOKEN`)
+/// reports that account's 5h/7d windows, and Claude Code does not pass the token on to the
+/// status line, so the tell is when the weekly windows reset: the same instant, the same
+/// account. True when the session reports no weekly window (nothing to compare).
+fn same_account(session_weekly_reset: &str, usage: &Value) -> bool {
+    let Ok(session) = session_weekly_reset.trim().parse::<i64>() else {
+        return true;
+    };
+    refresh::weekly_reset(usage)
+        .and_then(iso_micros)
+        .is_some_and(|login| (login / 1_000_000 - session).abs() <= 120)
+}
+
 fn quota_color(pct: i64) -> &'static str {
     if pct >= 90 {
         RED
@@ -401,6 +423,22 @@ mod tests {
         assert_eq!(pace_of("", SEVEN_DAYS, now), None);
         assert!(cpct(34, Some(33)).contains(RED));
         assert!(!cpct(33, Some(33)).contains(RED));
+    }
+
+    #[test]
+    fn fable_only_for_the_sessions_account() {
+        // 1794657600 = 2026-11-14T12:00:00Z
+        let usage: Value = serde_json::from_str(
+            r#"{"limits":[{"kind":"weekly_all","resets_at":"2026-11-14T11:59:59.873712+00:00"}]}"#,
+        )
+        .unwrap();
+        assert!(same_account("1794657600", &usage));
+        // The session runs on another account: its weekly window resets at another time.
+        assert!(!same_account("1794286800", &usage));
+        // No usage response cached (the figure, if any, is a leftover).
+        assert!(!same_account("1794657600", &Value::Null));
+        // The session reports no weekly window.
+        assert!(same_account("", &usage));
     }
 
     #[test]
